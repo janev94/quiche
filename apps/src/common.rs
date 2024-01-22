@@ -1264,11 +1264,11 @@ impl HttpConn for Http3Conn {
 
                             None =>
                                 if !self.dump_json {
-                                    self.output_sink.borrow_mut()(unsafe {
-                                        String::from_utf8_unchecked(
-                                            buf[..read].to_vec(),
-                                        )
-                                    });
+                                    // self.output_sink.borrow_mut()(unsafe {
+                                    //     String::from_utf8_unchecked(
+                                    //         buf[..read].to_vec(),
+                                    //     )
+                                    // });
                                 },
                         }
                     }
