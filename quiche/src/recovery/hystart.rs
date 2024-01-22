@@ -74,6 +74,8 @@ pub struct Hystart {
     css_start_time: Option<Instant>,
 
     css_round_count: usize,
+
+    pub cc_state: u64,
 }
 
 impl std::fmt::Debug for Hystart {
@@ -150,6 +152,7 @@ impl Hystart {
 
         // Slow Start.
         if self.css_start_time().is_none() {
+            self.cc_state = 0;
             if self.rtt_sample_count >= N_RTT_SAMPLE &&
                 self.current_round_min_rtt != Duration::MAX &&
                 self.last_round_min_rtt != Duration::MAX
@@ -170,6 +173,7 @@ impl Hystart {
             }
         } else {
             // Conservative Slow Start.
+            self.cc_state = 1;
             if self.rtt_sample_count >= N_RTT_SAMPLE {
                 self.rtt_sample_count = 0;
 
@@ -177,6 +181,7 @@ impl Hystart {
                     self.css_baseline_min_rtt = Duration::MAX;
 
                     // Back to Slow Start.
+                    self.cc_state = 0;
                     self.css_start_time = None;
                     self.css_round_count = 0;
                 }
@@ -195,6 +200,7 @@ impl Hystart {
                     // End of CSS - exit to congestion avoidance.
                     if self.css_round_count >= CSS_ROUNDS {
                         self.css_round_count = 0;
+                        self.cc_state = 2;
                         return true;
                     }
                 }
@@ -213,6 +219,7 @@ impl Hystart {
 
     // Exit HyStart++ when entering congestion avoidance.
     pub fn congestion_event(&mut self) {
+        self.cc_state = 2;
         self.window_end = None;
         self.css_start_time = None;
     }

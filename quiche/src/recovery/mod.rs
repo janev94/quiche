@@ -729,6 +729,16 @@ impl Recovery {
         self.smoothed_rtt.unwrap_or(INITIAL_RTT)
     }
 
+    pub fn get_cubic_state(&self) -> u64 {
+        if self.cwnd() < self.ssthresh {
+            return 0; // Slow Start
+        } else if self.hystart.css_start_time().is_some() {
+            return 1; // CSS
+        } else {
+            return 2; // Congestion Avoidance
+        }
+    }
+
     pub fn min_rtt(&self) -> Option<Duration> {
         if self.min_rtt == Duration::ZERO {
             return None;
@@ -1103,6 +1113,7 @@ impl Recovery {
             bytes_in_flight: self.bytes_in_flight as u64,
             ssthresh: self.ssthresh as u64,
             pacing_rate: self.pacer.rate(),
+            cubic_state: self.hystart.cc_state,
         };
 
         self.qlog_metrics.maybe_update(qlog_metrics)
@@ -1359,6 +1370,7 @@ struct QlogMetrics {
     bytes_in_flight: u64,
     ssthresh: u64,
     pacing_rate: u64,
+    cubic_state: u64,
 }
 
 #[cfg(feature = "qlog")]
@@ -1436,6 +1448,14 @@ impl QlogMetrics {
             None
         };
 
+        let new_cubic_state: Option<u64> = if self.cubic_state != latest.cubic_state {
+            self.cubic_state = latest.cubic_state;
+            emit_event = true;
+            Some(latest.cubic_state)
+        } else {
+            None
+        };
+
         if emit_event {
             // QVis can't use all these fields and they can be large.
             return Some(EventData::MetricsUpdated(
@@ -1450,6 +1470,7 @@ impl QlogMetrics {
                     ssthresh: new_ssthresh,
                     packets_in_flight: None,
                     pacing_rate: new_pacing_rate,
+                    cubic_state: new_cubic_state,
                 },
             ));
         }
