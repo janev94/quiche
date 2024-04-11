@@ -1115,6 +1115,7 @@ impl Recovery {
             pacing_rate: self.pacer.rate(),
             cubic_state: self.hystart.cc_state,
             lost_count: self.lost_count,
+            pto_count: self.pto_count,
         };
 
         self.qlog_metrics.maybe_update(qlog_metrics)
@@ -1373,6 +1374,7 @@ struct QlogMetrics {
     pacing_rate: u64,
     cubic_state: u64,
     lost_count: usize, 
+    pto_count: u32,
 }
 
 #[cfg(feature = "qlog")]
@@ -1466,6 +1468,14 @@ impl QlogMetrics {
             None
         };
 
+        let new_pto_count: Option<u32> = if self.pto_count != latest.pto_count {
+            self.pto_count = latest.pto_count;
+            emit_event = true;
+            Some(latest.pto_count)
+        } else {
+            None
+        };
+
         if emit_event {
             // QVis can't use all these fields and they can be large.
             return Some(EventData::MetricsUpdated(
@@ -1474,7 +1484,7 @@ impl QlogMetrics {
                     smoothed_rtt: new_smoothed_rtt,
                     latest_rtt: new_latest_rtt,
                     rtt_variance: new_rttvar,
-                    pto_count: None,
+                    pto_count: new_pto_count,
                     congestion_window: new_cwnd,
                     bytes_in_flight: new_bytes_in_flight,
                     ssthresh: new_ssthresh,
