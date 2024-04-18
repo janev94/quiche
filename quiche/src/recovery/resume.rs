@@ -1,9 +1,9 @@
 
 use std::time::Duration;
+use std::convert::TryInto;
 use crate::recovery::Acked;
 
 
-// to be initialised from environment variables later
 const PREVIOUS_RTT: Duration = Duration::from_millis(600);
 const JUMP_WINDOW: usize = 2000;
 
@@ -53,15 +53,37 @@ impl std::fmt::Debug for Resume {
 
 impl Resume {
     pub fn new(enabled: bool) -> Self {
+
+        let mut jump_window = JUMP_WINDOW;
+        let mut previous_rtt = PREVIOUS_RTT;
+
+        if let Some(jw_oss) = std::env::var_os("JUMP_WINDOW")
+        {
+            if let Ok(jw_string) = jw_oss.into_string() {
+                if let Ok(jw_int) = jw_string.parse::<usize>() {
+                    jump_window = jw_int;
+                }
+            }
+        }
+
+        if let Some(rtt_oss) = std::env::var_os("PREVIOUS_RTT") 
+        {
+            if let Ok(rtt_string) = rtt_oss.into_string() {
+                if let Ok(rtt_int) = rtt_string.parse::<usize>() {
+                    previous_rtt = Duration::from_millis(rtt_int.try_into().unwrap());
+                }
+            }
+        }
+
         Self {
             enabled,
 
             //Starting at recon as draft does not yet discuss observe
             cr_state: CrState::RECON,
 
-            previous_rtt: PREVIOUS_RTT,
+            previous_rtt: previous_rtt,
 
-            jump_window: JUMP_WINDOW,
+            jump_window: jump_window,
 
             pipesize: 0,
 
