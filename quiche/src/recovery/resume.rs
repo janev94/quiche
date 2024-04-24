@@ -1148,7 +1148,7 @@ mod tests {
             assert_eq!(r.resume.pipesize, 12_000 + 1200*(i+1) as usize);
         }
         // cwnd should not increase in unvalidated
-       // assert_eq!(r.congestion_window, 12_000);
+        assert_eq!(r.congestion_window, 12_000);
 
         let mut acked = ranges::RangeSet::default();
         acked.insert(30..31);
@@ -1166,7 +1166,7 @@ mod tests {
         );
         assert_eq!(r.resume.cr_state, CrState::Validating(79));
         assert_eq!(r.resume.pipesize, 49_200);
-        //assert_eq!(r.congestion_window, r.bytes_in_flight);
+        assert_eq!(r.congestion_window, r.bytes_in_flight);
     }
     #[test]
     fn packet_loss_unval_full_gap() {
@@ -1317,7 +1317,7 @@ mod tests {
         assert_eq!(r.resume.cr_state, CrState::SafeRetreat(19));
         assert_eq!(r.resume.pipesize, 2_400);
         // cwnd is updated before pipesize is increased
-       // assert_eq!(r.congestion_window, 2_400);
+        assert_eq!(r.congestion_window, 2_400);
 
     }
     #[test]
@@ -1339,9 +1339,7 @@ mod tests {
 
         let p = Acked {
             pkt_num: 99,
-            // To exit from recovery
             time_sent: now,
-            // More than cur_cwnd to increase cwnd
             size: 1200,
             delivered: 0,
             delivered_time: now,
@@ -1370,6 +1368,224 @@ mod tests {
         r.process_ack(105, &p, 5_000);
         assert_eq!(r.pipesize, 2_400);
         assert_eq!(r.cr_state, CrState::Normal);
+
+    }
+    #[test]
+    fn pipesize_update_validating_full() {
+        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm(CongestionControlAlgorithm::Reno);
+        cfg.enable_resume(true);
+
+        let mut r = Recovery::new(&cfg, "");
+        let mut now = Instant::now();
+
+        r.setup_careful_resume(Duration::from_millis(50), 100_000);
+        r.resume.change_state(CrState::Validating(30), CarefulResumeTrigger::CrMarkAcknowledged);
+        r.resume.pipesize = 12_000;
+
+        for i in 0..80 {
+            let p = Sent {
+                pkt_num: i as u64,
+                frames: smallvec![],
+                time_sent: now,
+                time_acked: None,
+                time_lost: None,
+                size: 1200,
+                ack_eliciting: true,
+                in_flight: true,
+                delivered: 0,
+                delivered_time: now,
+                first_sent_time: now,
+                is_app_limited: false,
+                tx_in_flight: 0,
+                lost: 0,
+                has_data: false,
+                pmtud: false,
+            };
+
+            r.on_packet_sent(
+                p,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+            assert_eq!(r.sent[packet::Epoch::Application].len(), i + 1);
+            assert_eq!(r.bytes_in_flight, 1200 * (i + 1));
+        }
+
+        assert_eq!(r.resume.cr_state, CrState::Validating(30));
+        assert_eq!(r.congestion_window, 12_000);
+
+        now += Duration::from_millis(50);
+        for i in 0..31 {
+            let mut acked = ranges::RangeSet::default();
+            acked.insert(i..i+1);
+            assert_eq!(
+                r.on_ack_received(
+                    &acked,
+                    25,
+                    packet::Epoch::Application,
+                    HandshakeStatus::default(),
+                    now,
+                    "",
+                    &mut Vec::new(),
+                ),
+                Ok((0, 0))
+            );
+            assert_eq!(r.bytes_in_flight, 96_000 - 1200*(i+1) as usize);
+            assert_eq!(r.resume.pipesize, 12_000 + 1200*(i+1) as usize);
+        }
+        assert_eq!(r.resume.cr_state, CrState::Normal);
+    }
+    #[test]
+    fn packet_loss_validating_full_gap() {
+        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm(CongestionControlAlgorithm::Reno);
+        cfg.enable_resume(true);
+
+        let mut r = Recovery::new(&cfg, "");
+        let mut now = Instant::now();
+
+        r.setup_careful_resume(Duration::from_millis(50), 100_000);
+        r.resume.change_state(CrState::Validating(40), CarefulResumeTrigger::CrMarkAcknowledged);
+        r.resume.pipesize = 12_000;
+
+        for i in 0..70 {
+            let p = Sent {
+                pkt_num: i as u64,
+                frames: smallvec![],
+                time_sent: now,
+                time_acked: None,
+                time_lost: None,
+                size: 1200,
+                ack_eliciting: true,
+                in_flight: true,
+                delivered: 0,
+                delivered_time: now,
+                first_sent_time: now,
+                is_app_limited: false,
+                tx_in_flight: 0,
+                lost: 0,
+                has_data: false,
+                pmtud: false,
+            };
+
+            r.on_packet_sent(
+                p,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+        }
+
+        now += Duration::from_millis(50);
+
+        let mut acked = ranges::RangeSet::default();
+        acked.insert(0..36);
+        let _ = r.on_ack_received(
+                    &acked,
+                    25,
+                    packet::Epoch::Application,
+                    HandshakeStatus::default(),
+                    now,
+                    "",
+                    &mut Vec::new(),
+                );
+        assert_eq!(r.resume.cr_state, CrState::Validating(40));
+        now += Duration::from_millis(50);
+
+        let mut acked = ranges::RangeSet::default();
+        acked.insert(39..40);
+        assert_eq!(r.on_ack_received(
+            &acked,
+            25,
+            packet::Epoch::Application,
+            HandshakeStatus::default(),
+            now,
+            "",
+            &mut Vec::new(),
+        ),
+        Ok((1, 1200)));
+        assert_eq!(r.resume.cr_state, CrState::SafeRetreat(40));
+        assert_eq!(r.resume.pipesize, 56_400);
+        // cwnd is updated before pipesize is increased
+        assert_eq!(r.congestion_window, (r.resume.pipesize - 1200)/2);
+
+    }
+
+    #[test]
+    fn packet_loss_validating_full_gap_small_pipe() {
+        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm(CongestionControlAlgorithm::Reno);
+        cfg.enable_resume(true);
+
+        let mut r = Recovery::new(&cfg, "");
+        let mut now = Instant::now();
+
+        r.setup_careful_resume(Duration::from_millis(50), 100_000);
+        r.resume.change_state(CrState::Validating(40), CarefulResumeTrigger::CwndLimited);
+
+        for i in 0..40 {
+            let p = Sent {
+                pkt_num: i as u64,
+                frames: smallvec![],
+                time_sent: now,
+                time_acked: None,
+                time_lost: None,
+                size: 1200,
+                ack_eliciting: true,
+                in_flight: true,
+                delivered: 0,
+                delivered_time: now,
+                first_sent_time: now,
+                is_app_limited: false,
+                tx_in_flight: 0,
+                lost: 0,
+                has_data: false,
+                pmtud: false,
+            };
+
+            r.on_packet_sent(
+                p,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+        }
+
+        now += Duration::from_millis(50);
+
+        let mut acked = ranges::RangeSet::default();
+        acked.insert(0..1);
+        let _ = r.on_ack_received(
+            &acked,
+            25,
+            packet::Epoch::Application,
+            HandshakeStatus::default(),
+            now,
+            "",
+            &mut Vec::new(),
+        );
+
+        assert_eq!(r.resume.cr_state, CrState::Validating(40));
+
+        acked.insert(5..6);
+        let _= r.on_ack_received(
+            &acked,
+            25,
+            packet::Epoch::Application,
+            HandshakeStatus::default(),
+            now,
+            "",
+            &mut Vec::new(),
+        );
+        assert_eq!(r.resume.cr_state, CrState::SafeRetreat(40));
+        assert_eq!(r.resume.pipesize, 2_400);
+        // cwnd is updated before pipesize is increased
+        assert_eq!(r.congestion_window, 2_400);
 
     }
 
@@ -1434,6 +1650,115 @@ mod tests {
         }
         assert_eq!(r.resume.cr_state, CrState::Normal);
     }
+
+    #[test]
+    fn pipesize_update_safe_retreat() {
+        let mut r = Resume::new("");
+        let mut now = Instant::now();
+
+        r.setup(Duration::from_millis(50), 80_000);
+        r.change_state(CrState::SafeRetreat(100), CarefulResumeTrigger::PacketLoss);
+
+        let p = Acked {
+            pkt_num: 99,
+            time_sent: now,
+            size: 1200,
+            delivered: 0,
+            delivered_time: now,
+            first_sent_time: now,
+            is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
+            rtt: Duration::ZERO,
+        };
+        r.process_ack(105, &p, 5_000);
+
+        let p = Acked {
+            pkt_num: 100,
+            // To exit from recovery
+            time_sent: now,
+            size: 1200,
+            delivered: 0,
+            delivered_time: now,
+            first_sent_time: now,
+            is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
+            rtt: Duration::ZERO,
+        };
+        r.process_ack(105, &p, 5_000);
+        assert_eq!(r.pipesize, 1_200);
+        assert_eq!(r.cr_state, CrState::Normal);
+
+    }
+    #[test]
+    fn pipesize_update_safe_retreat_full() {
+        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm(CongestionControlAlgorithm::Reno);
+        cfg.enable_resume(true);
+
+        let mut r = Recovery::new(&cfg, "");
+        let mut now = Instant::now();
+
+        r.setup_careful_resume(Duration::from_millis(50), 100_000);
+        r.resume.change_state(CrState::SafeRetreat(80), CarefulResumeTrigger::PacketLoss);
+        r.resume.pipesize = 12_000;
+
+        for i in 0..81 {
+            let p = Sent {
+                pkt_num: i as u64,
+                frames: smallvec![],
+                time_sent: now,
+                time_acked: None,
+                time_lost: None,
+                size: 1200,
+                ack_eliciting: true,
+                in_flight: true,
+                delivered: 0,
+                delivered_time: now,
+                first_sent_time: now,
+                is_app_limited: false,
+                tx_in_flight: 0,
+                lost: 0,
+                has_data: false,
+                pmtud: false,
+            };
+
+            r.on_packet_sent(
+                p,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+            assert_eq!(r.sent[packet::Epoch::Application].len(), i + 1);
+            assert_eq!(r.bytes_in_flight, 1200 * (i + 1));
+        }
+
+        assert_eq!(r.resume.cr_state, CrState::SafeRetreat(80));
+        assert_eq!(r.congestion_window, 12_000);
+
+        now += Duration::from_millis(50);
+        for i in 0..81 {
+            let mut acked = ranges::RangeSet::default();
+            acked.insert(i..i+1);
+            assert_eq!(
+                r.on_ack_received(
+                    &acked,
+                    25,
+                    packet::Epoch::Application,
+                    HandshakeStatus::default(),
+                    now,
+                    "",
+                    &mut Vec::new(),
+                ),
+                Ok((0, 0))
+            );
+        }
+        assert_eq!(r.resume.cr_state, CrState::Normal);
+        assert_eq!(r.ssthresh, r.resume.pipesize);
+    }
+
     #[test]
     fn cr_full() {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
