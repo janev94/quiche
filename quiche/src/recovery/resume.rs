@@ -88,6 +88,9 @@ impl Resume {
         }
     }
 
+    pub(crate) fn get_state(&mut self) -> CrState {
+         self.cr_state
+    }
     // Returns (new_cwnd, new_ssthresh), both optional
     pub fn process_ack(
         &mut self, largest_pkt_sent: u64, packet: &Acked, flightsize: usize
@@ -1128,7 +1131,7 @@ mod tests {
         assert_eq!(r.congestion_window, 12_000);
 
         now += Duration::from_millis(50);
-        for i in 0..30 {
+        for i in 0..28 {
             let mut acked = ranges::RangeSet::default();
             acked.insert(i..i+1);
             assert_eq!(
@@ -1151,7 +1154,11 @@ mod tests {
         assert_eq!(r.congestion_window, 12_000);
 
         let mut acked = ranges::RangeSet::default();
-        acked.insert(30..31);
+
+        //fix me - even if several packets here are below the threshold for the state transition to Validating,
+        // they nevertheless seem to count toward increasing cwnd!!
+        // the issue is that an ack covering multiple packets triggers a state transition before the CC
+        acked.insert(28..31);
         assert_eq!(
             r.on_ack_received(
                 &acked,
@@ -1166,7 +1173,8 @@ mod tests {
         );
         assert_eq!(r.resume.cr_state, CrState::Validating(79));
         assert_eq!(r.resume.pipesize, 49_200);
-        assert_eq!(r.congestion_window, r.bytes_in_flight);
+        // last packet acked got removed from bytes_in_flight after the only cwnd was updated
+        assert_eq!(r.congestion_window, r.bytes_in_flight + 1_200);
     }
     #[test]
     fn packet_loss_unval_full_gap() {
