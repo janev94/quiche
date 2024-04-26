@@ -97,6 +97,8 @@ pub struct State {
 
     // CUBIC state checkpoint preceding the last congestion event.
     prior: PriorState,
+
+    cc_state: u64,
 }
 
 /// Stores the CUBIC state from before the last congestion event.
@@ -147,7 +149,10 @@ impl State {
     }
 }
 
-fn on_init(_r: &mut Recovery) {}
+fn on_init(_r: &mut Recovery) {
+    _r.hystart.cc_state = 0;
+    println!("Init called {:?}", _r.hystart.cc_state);
+}
 
 fn reset(r: &mut Recovery) {
     r.cubic_state = State::default();
@@ -272,10 +277,12 @@ fn on_packet_acked(
 
         if r.hystart.on_packet_acked(epoch, packet, r.latest_rtt, now) {
             // Exit to congestion avoidance if CSS ends.
+            r.hystart.cc_state = 2;
             r.ssthresh = r.congestion_window;
         }
     } else {
         // Congestion avoidance.
+        r.hystart.cc_state = 2;
         let ca_start_time;
 
         // In CSS, use css_start_time instead of congestion_recovery_start_time.
