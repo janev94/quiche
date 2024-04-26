@@ -741,7 +741,7 @@ pub struct MetricsUpdated {
     pub latest_rtt: Option<f32>,
     pub rtt_variance: Option<f32>,
 
-    pub pto_count: Option<u16>,
+    pub pto_count: Option<u32>,
 
     pub congestion_window: Option<u64>,
     pub bytes_in_flight: Option<u64>,
