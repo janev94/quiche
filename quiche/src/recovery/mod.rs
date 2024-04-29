@@ -1120,6 +1120,7 @@ impl Recovery {
 
         // Call congestion control hooks.
         (self.cc_ops.on_packets_acked)(self, acked, epoch, now);
+
     }
 
     fn in_congestion_recovery(&self, sent_time: Instant) -> bool {
@@ -1172,7 +1173,7 @@ impl Recovery {
         if self.resume.enabled() {
             let new_cwnd = self.resume.congestion_event(self.largest_sent_pkt[epoch]);
             if new_cwnd != 0 {
-                self.congestion_window = cmp::max(new_cwnd, self.initial_window);
+                self.congestion_window = cmp::max(new_cwnd, self.max_datagram_size * MINIMUM_WINDOW_PACKETS);
             }
         }
     }
