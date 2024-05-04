@@ -2073,6 +2073,8 @@ impl Connection {
 
         self.qlog.level = level;
 
+        let time_offset = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
+
         let trace = qlog::TraceSeq::new(
             qlog::VantagePoint {
                 name: None,
@@ -2082,7 +2084,7 @@ impl Connection {
             Some(title.to_string()),
             Some(description.to_string()),
             Some(qlog::Configuration {
-                time_offset: Some(0.0),
+                time_offset: Some(time_offset),
                 original_uris: None,
             }),
             None,
