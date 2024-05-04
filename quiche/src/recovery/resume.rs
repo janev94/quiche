@@ -31,6 +31,8 @@ pub struct Resume {
     qlog_metrics: QlogMetrics,
     #[cfg(feature = "qlog")]
     last_trigger: Option<CarefulResumeTrigger>,
+
+    pub total_acked: usize,
 }
 
 impl std::fmt::Debug for Resume {
@@ -86,7 +88,8 @@ impl Resume {
             #[cfg(feature = "qlog")]
             qlog_metrics: QlogMetrics::default(),
             #[cfg(feature = "qlog")]
-            last_trigger: None
+            last_trigger: None,
+            total_acked: 0,
         }
     }
 
@@ -125,6 +128,7 @@ impl Resume {
     pub fn process_ack(
         &mut self, largest_pkt_sent: u64, packet: &Acked, flightsize: usize
     ) -> (Option<usize>, Option<usize>) {
+        self.total_acked += packet.size;
         match self.cr_state {
             CrState::Unvalidated(first_packet) => {
                 self.pipesize += packet.size;
@@ -724,7 +728,7 @@ mod tests {
             time_sent: now,
             time_acked: None,
             time_lost: None,
-            size: 1350,
+            size: 850,
             ack_eliciting: true,
             in_flight: true,
             delivered: 0,
@@ -749,8 +753,82 @@ mod tests {
         // make sure we are still in reconnaissance
         assert_eq!(r.resume.cr_state, CrState::Reconnaissance);
 
-        println!("Cwnd is {} {}", r.cwnd(), r.bytes_in_flight);
 
+        let mut acked = ranges::RangeSet::default();
+        acked.insert(0..r.sent[packet::Epoch::Application].len() as u64);
+
+        now += Duration::from_millis(50);
+
+        let _ = r.on_ack_received(
+            &acked,
+            0,
+            packet::Epoch::Application,
+            HandshakeStatus::default(),
+            now,
+            "",
+            &mut Vec::new(),
+        );
+
+        // Send enough packets to fill the pipe
+        for i in 0..20 {
+            let p = Sent {
+                pkt_num: 12 + i as u64,
+                frames: smallvec![],
+                time_sent: now,
+                time_acked: None,
+                time_lost: None,
+                size: 1350,
+                ack_eliciting: true,
+                in_flight: true,
+                delivered: 0,
+                delivered_time: now,
+                first_sent_time: now,
+                is_app_limited: false,
+                tx_in_flight: 0,
+                lost: 0,
+                has_data: false,
+                pmtud: false,
+            };
+
+            r.on_packet_sent(
+                p,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+            assert_eq!(r.bytes_in_flight, max_datagram_size * (i + 1));
+        }
+
+        let p = Sent {
+            pkt_num: 32 as u64,
+            frames: smallvec![],
+            time_sent: now,
+            time_acked: None,
+            time_lost: None,
+            size: 1350,
+            ack_eliciting: true,
+            in_flight: true,
+            delivered: 0,
+            delivered_time: now,
+            first_sent_time: now,
+            is_app_limited: false,
+            tx_in_flight: 0,
+            lost: 0,
+            has_data: false,
+            pmtud: false,
+        };
+
+        r.on_packet_sent(
+            p,
+            packet::Epoch::Application,
+            HandshakeStatus::default(),
+            now,
+            "",
+        );
+
+        assert_eq!(r.resume.cr_state, CrState::Unvalidated(31));
+        assert_eq!(r.cwnd(), 300_000);
 
     }
 
