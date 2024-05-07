@@ -66,7 +66,7 @@ pub struct Hystart {
 
     css_round_count: usize,
 
-    pub cc_staet: u64,
+    pub cc_state: u64,
 }
 
 impl std::fmt::Debug for Hystart {
