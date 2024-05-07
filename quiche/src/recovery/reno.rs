@@ -86,13 +86,18 @@ fn on_packet_acked(
         if r.hystart.in_css(epoch) {
             r.congestion_window += r.hystart.css_cwnd_inc(r.max_datagram_size);
         } else {
+        if r.resume.enabled() {
             let cr_state = r.resume.get_state();
             match cr_state {
                 CrState::Unvalidated(_) => {}
+                CrState::SafeRetreat(_) => {}
                 _ => {
                     r.congestion_window += r.max_datagram_size;
-                }
+                    }
             }
+        } else {
+            r.congestion_window += r.max_datagram_size;
+        }
         }
 
         if r.hystart.on_packet_acked(epoch, packet, r.latest_rtt, now) {
