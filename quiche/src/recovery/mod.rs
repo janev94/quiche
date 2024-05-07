@@ -381,9 +381,11 @@ impl Recovery {
             self.on_packet_sent_cc(sent_bytes, now);
 
             if self.resume.enabled() && epoch == packet::Epoch::Application {
+                let bytes_acked = self.resume.total_acked;
+                let iw_acked = bytes_acked >= self.initial_window;
                 // Increase the congestion window by a jump determined by careful resume
                 self.congestion_window += self.resume.send_packet(
-                    self.smoothed_rtt, self.congestion_window, self.largest_sent_pkt[epoch], self.app_limited
+                    self.smoothed_rtt, self.congestion_window, self.largest_sent_pkt[epoch], self.app_limited, iw_acked
                 );
             }
 
