@@ -624,19 +624,7 @@ impl Recovery {
         let (lost_packets, lost_bytes) =
             self.detect_lost_packets(epoch, now, trace_id);
 
-        if self.resume.enabled() {
-            for packet in newly_acked.iter() {
-                let (new_cwnd, new_ssthresh) = self.resume.process_ack(
-                    self.largest_sent_pkt[epoch], packet, self.bytes_in_flight
-                );
-                if let Some(new_cwnd) = new_cwnd {
-                    self.congestion_window = new_cwnd;
-                }
-                if let Some(new_ssthresh) = new_ssthresh {
-                    self.ssthresh = new_ssthresh;
-                }
-            }
-        }
+
 
         self.on_packets_acked(newly_acked, epoch, now);
 
