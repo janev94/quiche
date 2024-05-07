@@ -273,9 +273,19 @@ fn on_packet_acked(
                 r.congestion_window +=
                     r.hystart.css_cwnd_inc(r.max_datagram_size);
             } else {
-                r.congestion_window += r.max_datagram_size;
+                if r.resume.enabled() {
+                    let cr_state = r.resume.get_state();
+                    match cr_state {
+                        CrState::Unvalidated(_) => {}
+                        CrState::SafeRetreat(_) => {}
+                        _ => {
+                            r.congestion_window += r.max_datagram_size;
+                        }
+                    }
+                } else {
+                    r.congestion_window += r.max_datagram_size;
+                }
             }
-
             r.bytes_acked_sl -= r.max_datagram_size;
         }
 
