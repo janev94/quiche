@@ -1100,6 +1100,12 @@ impl Recovery {
     fn on_packets_acked(
         &mut self, acked: &mut Vec<Acked>, epoch: packet::Epoch, now: Instant,
     ) {
+        // MY: We cannot process the bulk ACK'd packets here and have to implement resume processing within the CC algorithm.
+        // This is because if a packet ACKs multiple receipts AND one of the received packets triggers CR state transition, 
+        // then ALL ACK'd packets would be treated with the new, transitioned, state.
+        // We do not want this behaviour, so we have to process ACKs within the CC to avoid this.
+        // For reference, see recovery/reno.rs and recovery/cubic.rs on_packets_acked()
+
         // Update delivery rate sample per acked packet.
         for pkt in acked.iter() {
             self.delivery_rate.update_rate_sample(pkt, now);

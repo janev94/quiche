@@ -209,14 +209,18 @@ fn on_packets_acked(
 ) {
     for pkt in packets.drain(..) {
         on_packet_acked(r, &pkt, epoch, now);
-        let (new_cwnd, new_ssthresh) = r.resume.process_ack(
-            r.largest_sent_pkt[epoch], &pkt, r.bytes_in_flight);
-        if let Some(new_cwnd) = new_cwnd {
-            r.congestion_window = new_cwnd;
+        if r.resume.enabled() {
+            // Process ACKS using CR to update cwnd and ssthresh if needed
+            let (new_cwnd, new_ssthresh) = r.resume.process_ack(
+                r.largest_sent_pkt[epoch], &pkt, r.bytes_in_flight);
+            if let Some(new_cwnd) = new_cwnd {
+                r.congestion_window = new_cwnd;
+            }
+            if let Some(new_ssthresh) = new_ssthresh {
+                r.ssthresh = new_ssthresh;
+            }
         }
-        if let Some(new_ssthresh) = new_ssthresh {
-            r.ssthresh = new_ssthresh;
-        }
+
     }
 }
 
