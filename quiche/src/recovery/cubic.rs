@@ -44,6 +44,7 @@ use crate::recovery::Acked;
 use crate::recovery::CongestionControlOps;
 use crate::recovery::Recovery;
 use crate::recovery::Sent;
+use crate::recovery::resume::CrState;
 
 pub static CUBIC: CongestionControlOps = CongestionControlOps {
     on_init,
@@ -213,6 +214,14 @@ fn on_packets_acked(
 ) {
     for pkt in packets.drain(..) {
         on_packet_acked(r, &pkt, epoch, now);
+        let (new_cwnd, new_ssthresh) = r.resume.process_ack(
+            r.largest_sent_pkt[epoch], &pkt, r.bytes_in_flight);
+        if let Some(new_cwnd) = new_cwnd {
+            r.congestion_window = new_cwnd;
+        }
+        if let Some(new_ssthresh) = new_ssthresh {
+            r.ssthresh = new_ssthresh;
+        }
     }
 }
 
@@ -269,9 +278,19 @@ fn on_packet_acked(
                 r.congestion_window +=
                     r.hystart.css_cwnd_inc(r.max_datagram_size);
             } else {
-                r.congestion_window += r.max_datagram_size;
+                if r.resume.enabled() {
+                    let cr_state = r.resume.get_state();
+                    match cr_state {
+                        CrState::Unvalidated(_) => {}
+                        CrState::SafeRetreat(_) => {}
+                        _ => {
+                            r.congestion_window += r.max_datagram_size;
+                        }
+                    }
+                } else {
+                    r.congestion_window += r.max_datagram_size;
+                }
             }
-
             r.bytes_acked_sl -= r.max_datagram_size;
         }
 

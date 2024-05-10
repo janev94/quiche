@@ -27,12 +27,13 @@ pub struct Resume {
     previous_cwnd: usize,
     pipesize: usize,
 
+    pub total_acked: usize,
+
     #[cfg(feature = "qlog")]
     qlog_metrics: QlogMetrics,
     #[cfg(feature = "qlog")]
     last_trigger: Option<CarefulResumeTrigger>,
 
-    pub total_acked: usize,
 }
 
 impl std::fmt::Debug for Resume {
@@ -85,11 +86,12 @@ impl Resume {
             previous_cwnd: previous_cwnd,
             pipesize: 0,
 
+            total_acked: 0,
+
             #[cfg(feature = "qlog")]
             qlog_metrics: QlogMetrics::default(),
             #[cfg(feature = "qlog")]
             last_trigger: None,
-            total_acked: 0,
         }
     }
 
@@ -170,7 +172,7 @@ impl Resume {
     }
 
     pub fn send_packet(
-        &mut self, rtt_sample: Option<Duration>, cwnd: usize, largest_pkt_sent: u64, app_limited: bool, iw_acked: bool
+        &mut self, rtt_sample: Option<Duration>, cwnd: usize, largest_pkt_sent: u64, app_limited: bool, iw_acked: bool,
     ) -> usize {
         // Do nothing when data limited to avoid having insufficient data
         // to be able to validate transmission at a higher rate
@@ -536,18 +538,18 @@ mod tests {
         let mut r = Recovery::new(&cfg, "");
         let mut now = Instant::now();
 
-        r.setup_careful_resume(Duration::from_millis(50), 100_000);
+        r.setup_careful_resume(Duration::from_millis(50), 120_000);
 
         assert_eq!(r.sent[packet::Epoch::Application].len(), 0);
 
-        for i in 0..5 {
+        for i in 0..12 {
             let p = Sent {
                 pkt_num: i as u64,
                 frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
                 time_lost: None,
-                size: 1000,
+                size: 1200,
                 ack_eliciting: true,
                 in_flight: true,
                 delivered: 0,
@@ -568,7 +570,7 @@ mod tests {
                 "",
             );
             assert_eq!(r.sent[packet::Epoch::Application].len(), i + 1);
-            assert_eq!(r.bytes_in_flight, 1000 * (i + 1));
+            assert_eq!(r.bytes_in_flight, 1200 * (i + 1));
         }
 
         assert_eq!(r.resume.cr_state, CrState::Reconnaissance);
@@ -576,7 +578,7 @@ mod tests {
         now += Duration::from_millis(50);
 
         let mut acked = ranges::RangeSet::default();
-        acked.insert(0..5);
+        acked.insert(0..12);
 
         assert_eq!(
             r.on_ack_received(
@@ -591,17 +593,17 @@ mod tests {
             Ok((0, 0))
         );
 
-        assert_eq!(r.cwnd(), 12_000);
+        assert_eq!(r.cwnd(), 26_400);
 
-        // Send significantly more than the CWND to enter app limited
-        for i in 0..16 {
+        // Send more than the CWND to enter app limited
+        for i in 0..23 {
             let p = Sent {
-                pkt_num: 5 + i as u64,
+                pkt_num: 12 + i as u64,
                 frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
                 time_lost: None,
-                size: 1000,
+                size: 1200,
                 ack_eliciting: true,
                 in_flight: true,
                 delivered: 0,
@@ -622,13 +624,117 @@ mod tests {
                 "",
             );
             assert_eq!(r.sent[packet::Epoch::Application].len(), i + 1);
-            assert_eq!(r.bytes_in_flight, 1000 * (i + 1));
+            assert_eq!(r.bytes_in_flight, 1200 * (i + 1));
         }
 
-        assert_eq!(r.cwnd(), 50_000);
+        assert_eq!(r.cwnd(), 60_000);
 
-        assert_eq!(r.resume.cr_state, CrState::Unvalidated(16));
-        assert_eq!(r.resume.pipesize, 12_000);
+        assert_eq!(r.resume.cr_state, CrState::Unvalidated(33));
+        assert_eq!(r.resume.pipesize, 26_400);
+    }
+
+
+    #[test]
+    fn valid_rtt_full_cubic() {
+        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        cfg.set_cc_algorithm(CongestionControlAlgorithm::CUBIC);
+        cfg.enable_hystart(true);
+        cfg.enable_resume(true);
+
+        let mut r = Recovery::new(&cfg, "");
+        let mut now = Instant::now();
+
+        r.setup_careful_resume(Duration::from_millis(50), 120_000);
+
+        assert_eq!(r.sent[packet::Epoch::Application].len(), 0);
+
+        for i in 0..12 {
+            let p = Sent {
+                pkt_num: i as u64,
+                frames: smallvec![],
+                time_sent: now,
+                time_acked: None,
+                time_lost: None,
+                size: 1200,
+                ack_eliciting: true,
+                in_flight: true,
+                delivered: 0,
+                delivered_time: now,
+                first_sent_time: now,
+                is_app_limited: false,
+                tx_in_flight: 0,
+                lost: 0,
+                has_data: false,
+                pmtud: false,
+            };
+
+            r.on_packet_sent(
+                p,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+            assert_eq!(r.sent[packet::Epoch::Application].len(), i + 1);
+            assert_eq!(r.bytes_in_flight, 1200 * (i + 1));
+        }
+
+        assert_eq!(r.resume.cr_state, CrState::Reconnaissance);
+
+        now += Duration::from_millis(50);
+
+        let mut acked = ranges::RangeSet::default();
+        acked.insert(0..12);
+
+        assert_eq!(
+            r.on_ack_received(
+                &acked,
+                25,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+                &mut Vec::new(),
+            ),
+            Ok((0, 0))
+        );
+
+        // Send significantly more than the CWND to enter app limited
+        for i in 0..23 {
+            let p = Sent {
+                pkt_num: 12 + i as u64,
+                frames: smallvec![],
+                time_sent: now,
+                time_acked: None,
+                time_lost: None,
+                size: 1200,
+                ack_eliciting: true,
+                in_flight: true,
+                delivered: 0,
+                delivered_time: now,
+                first_sent_time: now,
+                is_app_limited: false,
+                tx_in_flight: 0,
+                lost: 0,
+                has_data: false,
+                pmtud: false,
+            };
+
+            r.on_packet_sent(
+                p,
+                packet::Epoch::Application,
+                HandshakeStatus::default(),
+                now,
+                "",
+            );
+            assert_eq!(r.sent[packet::Epoch::Application].len(), i + 1);
+            assert_eq!(r.bytes_in_flight, 1200 * (i + 1));
+        }
+
+        assert_eq!(r.cwnd(), 60_000);
+
+        assert_eq!(r.resume.cr_state, CrState::Unvalidated(33));
+        assert_eq!(r.resume.pipesize, 26_400);
     }
 
 
@@ -653,7 +759,7 @@ mod tests {
         r.update_rtt(Duration::from_millis(50), Duration::from_millis(0), now);        
 
         r.setup_careful_resume(Duration::from_millis(50), 600_000);
-     
+
         assert_eq!(r.sent[packet::Epoch::Application].len(), 0);
 
         // Send packets to fill the cwnd
@@ -753,7 +859,7 @@ mod tests {
         // make sure we are still in reconnaissance
         assert_eq!(r.resume.cr_state, CrState::Reconnaissance);
 
-
+        
         let mut acked = ranges::RangeSet::default();
         acked.insert(0..r.sent[packet::Epoch::Application].len() as u64);
 
@@ -830,111 +936,10 @@ mod tests {
         assert_eq!(r.resume.cr_state, CrState::Unvalidated(31));
         assert_eq!(r.cwnd(), 300_000);
 
+
     }
+   
 
-
-    #[test]
-    fn valid_rtt_full_cubic() {
-        let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
-        cfg.set_cc_algorithm(CongestionControlAlgorithm::CUBIC);
-        cfg.enable_hystart(true);
-        cfg.enable_resume(true);
-
-        let mut r = Recovery::new(&cfg, "");
-        let mut now = Instant::now();
-
-        r.setup_careful_resume(Duration::from_millis(50), 80_000);
-
-        assert_eq!(r.sent[packet::Epoch::Application].len(), 0);
-
-        for i in 0..5 {
-            let p = Sent {
-                pkt_num: i as u64,
-                frames: smallvec![],
-                time_sent: now,
-                time_acked: None,
-                time_lost: None,
-                size: 1000,
-                ack_eliciting: true,
-                in_flight: true,
-                delivered: 0,
-                delivered_time: now,
-                first_sent_time: now,
-                is_app_limited: false,
-                tx_in_flight: 0,
-                lost: 0,
-                has_data: false,
-                pmtud: false,
-            };
-
-            r.on_packet_sent(
-                p,
-                packet::Epoch::Application,
-                HandshakeStatus::default(),
-                now,
-                "",
-            );
-            assert_eq!(r.sent[packet::Epoch::Application].len(), i + 1);
-            assert_eq!(r.bytes_in_flight, 1000 * (i + 1));
-        }
-
-        assert_eq!(r.resume.cr_state, CrState::Reconnaissance);
-
-        now += Duration::from_millis(50);
-
-        let mut acked = ranges::RangeSet::default();
-        acked.insert(0..5);
-
-        assert_eq!(
-            r.on_ack_received(
-                &acked,
-                25,
-                packet::Epoch::Application,
-                HandshakeStatus::default(),
-                now,
-                "",
-                &mut Vec::new(),
-            ),
-            Ok((0, 0))
-        );
-
-        // Send significantly more than the CWND to enter app limited
-        for i in 0..16 {
-            let p = Sent {
-                pkt_num: 5 + i as u64,
-                frames: smallvec![],
-                time_sent: now,
-                time_acked: None,
-                time_lost: None,
-                size: 1000,
-                ack_eliciting: true,
-                in_flight: true,
-                delivered: 0,
-                delivered_time: now,
-                first_sent_time: now,
-                is_app_limited: false,
-                tx_in_flight: 0,
-                lost: 0,
-                has_data: false,
-                pmtud: false,
-            };
-
-            r.on_packet_sent(
-                p,
-                packet::Epoch::Application,
-                HandshakeStatus::default(),
-                now,
-                "",
-            );
-            assert_eq!(r.sent[packet::Epoch::Application].len(), i + 1);
-            assert_eq!(r.bytes_in_flight, 1000 * (i + 1));
-        }
-
-        assert_eq!(r.cwnd(), 40_000);
-
-        assert_eq!(r.resume.cr_state, CrState::Unvalidated(16));
-        assert_eq!(r.resume.pipesize, 12_000);
-    }
     #[test]
     fn invalid_rtt_full() {
         let mut cfg = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
@@ -948,7 +953,7 @@ mod tests {
 
         assert_eq!(r.sent[packet::Epoch::Application].len(), 0);
 
-        for i in 0..4 {
+        for i in 0..12 {
             let p = Sent {
                 pkt_num: i as u64,
                 frames: smallvec![],
@@ -984,7 +989,7 @@ mod tests {
         now += Duration::from_millis(600);
 
         let mut acked = ranges::RangeSet::default();
-        acked.insert(0..4);
+        acked.insert(0..12);
 
         assert_eq!(
             r.on_ack_received(
@@ -1000,14 +1005,14 @@ mod tests {
         );
 
         // Send significantly more than the CWND to enter app limited
-        for i in 0..20 {
+        for i in 0..23 {
             let p = Sent {
-                pkt_num: 4 + i as u64,
+                pkt_num: 12 + i as u64,
                 frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
                 time_lost: None,
-                size: 1000,
+                size: 1200,
                 ack_eliciting: true,
                 in_flight: true,
                 delivered: 0,
@@ -1028,7 +1033,7 @@ mod tests {
                 "",
             );
             assert_eq!(r.sent[packet::Epoch::Application].len(), i + 1);
-            assert_eq!(r.bytes_in_flight, 1000 * (i + 1));
+            assert_eq!(r.bytes_in_flight, 1200 * (i + 1));
         }
         assert_eq!(r.resume.cr_state, CrState::Normal);
     }
@@ -1398,9 +1403,6 @@ mod tests {
 
         let mut acked = ranges::RangeSet::default();
 
-        //fix me - even if several packets here are below the threshold for the state transition to Validating,
-        // they nevertheless seem to count toward increasing cwnd!!
-        // the issue is that an ack covering multiple packets triggers a state transition before the CC
         acked.insert(28..31);
         assert_eq!(
             r.on_ack_received(
@@ -1416,8 +1418,7 @@ mod tests {
         );
         assert_eq!(r.resume.cr_state, CrState::Validating(79));
         assert_eq!(r.resume.pipesize, 49_200);
-        // last packet acked got removed from bytes_in_flight after the only cwnd was updated
-        assert_eq!(r.congestion_window, r.bytes_in_flight + 1_200);
+        assert_eq!(r.congestion_window, r.bytes_in_flight);
     }
     #[test]
     fn packet_loss_unval_full_gap() {
@@ -2022,14 +2023,14 @@ mod tests {
         r.setup_careful_resume(Duration::from_millis(30), 120_000);
         assert_eq!(r.sent[packet::Epoch::Application].len(), 0);
 
-        for i in 0..4 {
+        for i in 0..12 {
             let p = Sent {
                 pkt_num: i as u64,
                 frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
                 time_lost: None,
-                size: 1000,
+                size: 1200,
                 ack_eliciting: true,
                 in_flight: true,
                 delivered: 0,
@@ -2050,7 +2051,7 @@ mod tests {
                 "",
             );
             assert_eq!(r.sent[packet::Epoch::Application].len(), i + 1);
-            assert_eq!(r.bytes_in_flight, 1000 * (i + 1));
+            assert_eq!(r.bytes_in_flight, 1200 * (i + 1));
         }
 
         assert_eq!(r.resume.cr_state, CrState::Reconnaissance);
@@ -2058,7 +2059,7 @@ mod tests {
         now += Duration::from_millis(25);
 
         let mut acked = ranges::RangeSet::default();
-        acked.insert(0..4);
+        acked.insert(0..12);
 
         assert_eq!(
             r.on_ack_received(
@@ -2074,14 +2075,14 @@ mod tests {
         );
 
         // Send significantly more than the CWND to enter app limited
-        for i in 0..40 {
+        for i in 0..80 {
             let p = Sent {
-                pkt_num: 4 + i as u64,
+                pkt_num: 12 + i as u64,
                 frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
                 time_lost: None,
-                size: 1000,
+                size: 1200,
                 ack_eliciting: true,
                 in_flight: true,
                 delivered: 0,
@@ -2102,16 +2103,16 @@ mod tests {
                 "",
             );
             assert_eq!(r.sent[packet::Epoch::Application].len(), i + 1);
-            assert_eq!(r.bytes_in_flight, 1000 * (i + 1));
+            assert_eq!(r.bytes_in_flight, 1200 * (i + 1));
         }
 
-        assert_eq!(r.resume.cr_state, CrState::Unvalidated(15));
+        assert_eq!(r.resume.cr_state, CrState::Unvalidated(33));
         assert_eq!(r.congestion_window, 60_000);
 
         now += Duration::from_millis(25);
 
         let mut acked = ranges::RangeSet::default();
-        acked.insert(4..15);
+        acked.insert(4..33);
 
         assert_eq!(
             r.on_ack_received(
@@ -2126,10 +2127,10 @@ mod tests {
             Ok((0, 0))
         );
 
-        assert_eq!(r.resume.cr_state, CrState::Unvalidated(15));
+        assert_eq!(r.resume.cr_state, CrState::Unvalidated(33));
 
         let mut acked = ranges::RangeSet::default();
-        acked.insert(15..16);
+        acked.insert(33..34);
 
         assert_eq!(
             r.on_ack_received(
@@ -2144,12 +2145,12 @@ mod tests {
             Ok((0, 0))
         );
 
-        assert_eq!(r.resume.cr_state, CrState::Validating(43));
+        assert_eq!(r.resume.cr_state, CrState::Validating(91));
 
         now += Duration::from_millis(25);
 
         let mut acked = ranges::RangeSet::default();
-        acked.insert(16..44);
+        acked.insert(34..92);
 
         assert_eq!(
             r.on_ack_received(
@@ -2180,7 +2181,7 @@ mod tests {
 
         assert_eq!(r.sent[packet::Epoch::Application].len(), 0);
 
-        for i in 0..4 {
+        for i in 0..12 {
             let p = Sent {
                 pkt_num: i as u64,
                 frames: smallvec![],
@@ -2216,7 +2217,7 @@ mod tests {
         now += Duration::from_millis(25);
 
         let mut acked = ranges::RangeSet::default();
-        acked.insert(0..4);
+        acked.insert(0..12);
 
         assert_eq!(
             r.on_ack_received(
@@ -2232,16 +2233,19 @@ mod tests {
         );
 
         assert_eq!(r.resume.cr_state, CrState::Reconnaissance);
+        // 12_000 + 12 * 1200
+        assert_eq!(r.congestion_window, 26_400);
+        assert_eq!(r.resume.total_acked, 12_000);
 
-        // Send significantly more than the CWND to enter app limited
-        for i in 0..20 {
+        // Send  more than the CWND to enter app limited
+        for i in 0..24 {
             let p = Sent {
-                pkt_num: 4 + i as u64,
+                pkt_num: 11 + i as u64,
                 frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
                 time_lost: None,
-                size: 1000,
+                size: 1200,
                 ack_eliciting: true,
                 in_flight: true,
                 delivered: 0,
@@ -2262,10 +2266,11 @@ mod tests {
                 "",
             );
             assert_eq!(r.sent[packet::Epoch::Application].len(), i + 1);
-            assert_eq!(r.bytes_in_flight, 1000 * (i + 1));
+            assert_eq!(r.bytes_in_flight, 1200 * (i + 1));
         }
-
-        assert_eq!(r.resume.cr_state, CrState::Unvalidated(15));
+        //bytes in flight: 28_800 > 26_400 by 2 packets
+        //jump at 32, largest sent 34
+        assert_eq!(r.resume.cr_state, CrState::Unvalidated(32));
         assert_eq!(r.congestion_window, 60_000);
         let mut expected_pipesize = r.resume.pipesize;
 
@@ -2273,7 +2278,7 @@ mod tests {
 
         // Ack with one missing
         let mut acked = ranges::RangeSet::default();
-        acked.insert(5..15);
+        acked.insert(12..15);
 
         assert_eq!(
             r.on_ack_received(
@@ -2285,18 +2290,18 @@ mod tests {
                 "",
                 &mut Vec::new(),
             ),
-            Ok((1, 1000))
+            Ok((1, 1200))
         );
 
-        assert_eq!(r.resume.cr_state, CrState::SafeRetreat(23));
-        assert_eq!(r.congestion_window, 12_000);
-        expected_pipesize += 10_000;
+        assert_eq!(r.resume.cr_state, CrState::SafeRetreat(34));
+        assert_eq!(r.congestion_window, 13_200);
+        expected_pipesize += 3_600;
         assert_eq!(r.resume.pipesize, expected_pipesize);
 
         now += Duration::from_millis(25);
 
         let mut acked = ranges::RangeSet::default();
-        acked.insert(16..24);
+        acked.insert(16..35);
 
         assert_eq!(
             r.on_ack_received(
@@ -2308,11 +2313,11 @@ mod tests {
                 "",
                 &mut Vec::new(),
             ),
-            Ok((1, 1000))
+            Ok((1, 1200))
         );
 
         assert_eq!(r.resume.cr_state, CrState::Normal);
-        expected_pipesize += 7_000;
+        expected_pipesize += 21_600;
         assert_eq!(r.resume.pipesize, expected_pipesize);
         assert_eq!(r.ssthresh, expected_pipesize);
     }
@@ -2330,14 +2335,14 @@ mod tests {
 
         assert_eq!(r.sent[packet::Epoch::Application].len(), 0);
 
-        for i in 0..4 {
+        for i in 0..12 {
             let p = Sent {
                 pkt_num: i as u64,
                 frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
                 time_lost: None,
-                size: 1000,
+                size: 1200,
                 ack_eliciting: true,
                 in_flight: true,
                 delivered: 0,
@@ -2358,7 +2363,7 @@ mod tests {
                 "",
             );
             assert_eq!(r.sent[packet::Epoch::Application].len(), i + 1);
-            assert_eq!(r.bytes_in_flight, 1000 * (i + 1));
+            assert_eq!(r.bytes_in_flight, 1200 * (i + 1));
         }
 
         assert_eq!(r.resume.cr_state, CrState::Reconnaissance);
@@ -2366,7 +2371,7 @@ mod tests {
         now += Duration::from_millis(25);
 
         let mut acked = ranges::RangeSet::default();
-        acked.insert(0..4);
+        acked.insert(0..12);
 
         assert_eq!(
             r.on_ack_received(
@@ -2384,14 +2389,14 @@ mod tests {
         assert_eq!(r.resume.cr_state, CrState::Reconnaissance);
 
         // Send significantly more than the CWND to enter app limited
-        for i in 0..40 {
+        for i in 0..80 {
             let p = Sent {
-                pkt_num: 4 + i as u64,
+                pkt_num: 12 + i as u64,
                 frames: smallvec![],
                 time_sent: now,
                 time_acked: None,
                 time_lost: None,
-                size: 1000,
+                size: 1200,
                 ack_eliciting: true,
                 in_flight: true,
                 delivered: 0,
@@ -2412,17 +2417,17 @@ mod tests {
                 "",
             );
             assert_eq!(r.sent[packet::Epoch::Application].len(), i + 1);
-            assert_eq!(r.bytes_in_flight, 1000 * (i + 1));
+            assert_eq!(r.bytes_in_flight, 1200 * (i + 1));
         }
 
-        assert_eq!(r.resume.cr_state, CrState::Unvalidated(15));
+        assert_eq!(r.resume.cr_state, CrState::Unvalidated(33));
         assert_eq!(r.congestion_window, 60_000);
         let mut expected_pipesize = r.resume.pipesize;
 
         now += Duration::from_millis(25);
 
         let mut acked = ranges::RangeSet::default();
-        acked.insert(4..16);
+        acked.insert(12..34);
 
         assert_eq!(
             r.on_ack_received(
@@ -2437,14 +2442,14 @@ mod tests {
             Ok((0, 0))
         );
 
-        assert_eq!(r.resume.cr_state, CrState::Validating(43));
-        expected_pipesize += 12_000;
+        assert_eq!(r.resume.cr_state, CrState::Validating(91));
+        expected_pipesize += 26_400;
         assert_eq!(r.resume.pipesize, expected_pipesize);
 
         now += Duration::from_millis(25);
 
         let mut acked = ranges::RangeSet::default();
-        acked.insert(17..20);
+        acked.insert(37..38);
 
         assert_eq!(
             r.on_ack_received(
@@ -2456,17 +2461,17 @@ mod tests {
                 "",
                 &mut Vec::new(),
             ),
-            Ok((1, 1000))
+            Ok((1, 1200))
         );
 
-        assert_eq!(r.resume.cr_state, CrState::SafeRetreat(43));
-        expected_pipesize += 3_000;
+        assert_eq!(r.resume.cr_state, CrState::SafeRetreat(91));
+        expected_pipesize += 1_200;
         assert_eq!(r.resume.pipesize, expected_pipesize);
 
         now += Duration::from_millis(25);
 
         let mut acked = ranges::RangeSet::default();
-        acked.insert(20..44);
+        acked.insert(35..92);
 
         assert_eq!(
             r.on_ack_received(
@@ -2482,7 +2487,7 @@ mod tests {
         );
 
         assert_eq!(r.resume.cr_state, CrState::Normal);
-        expected_pipesize += 23_000;
+        expected_pipesize += 66_000;
         assert_eq!(r.resume.pipesize, expected_pipesize);
         assert_eq!(r.ssthresh, expected_pipesize);
     }

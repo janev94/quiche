@@ -381,9 +381,9 @@ impl Recovery {
             self.on_packet_sent_cc(sent_bytes, now);
 
             if self.resume.enabled() && epoch == packet::Epoch::Application {
-                // Increase the congestion window by a jump determined by careful resume
                 let bytes_acked = self.resume.total_acked;
                 let iw_acked = bytes_acked >= self.initial_window;
+                // Increase the congestion window by a jump determined by careful resume
                 self.congestion_window += self.resume.send_packet(
                     self.smoothed_rtt, self.congestion_window, self.largest_sent_pkt[epoch], self.app_limited, iw_acked
                 );
@@ -624,19 +624,7 @@ impl Recovery {
         let (lost_packets, lost_bytes) =
             self.detect_lost_packets(epoch, now, trace_id);
 
-        if self.resume.enabled() {
-            for packet in newly_acked.iter() {
-                let (new_cwnd, new_ssthresh) = self.resume.process_ack(
-                    self.largest_sent_pkt[epoch], packet, self.bytes_in_flight
-                );
-                if let Some(new_cwnd) = new_cwnd {
-                    self.congestion_window = new_cwnd;
-                }
-                if let Some(new_ssthresh) = new_ssthresh {
-                    self.ssthresh = new_ssthresh;
-                }
-            }
-        }
+
 
         self.on_packets_acked(newly_acked, epoch, now);
 
