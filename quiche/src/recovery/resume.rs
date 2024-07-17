@@ -56,42 +56,9 @@ impl Resume {
         let mut enabled = true;
         let mut use_sr = true;
         
-        let mut previous_rtt = Duration::ZERO;
-        let mut previous_cwnd = 0;
+        let mut previous_rtt = Duration::from_millis(600);
+        let mut previous_cwnd = 800_000;
 
-        if let Some(jw_oss) = std::env::var_os("PREVIOUS_CWND_BYTES")
-        {
-            if let Ok(jw_string) = jw_oss.into_string() {
-                if let Ok(jw_int) = jw_string.parse::<usize>() {
-                    previous_cwnd = jw_int;
-                }
-            }
-        } else {
-            enabled = false;
-        }
-
-        if let Some(rtt_oss) = std::env::var_os("PREVIOUS_RTT") 
-        {
-            if let Ok(rtt_string) = rtt_oss.into_string() {
-                if let Ok(rtt_int) = rtt_string.parse::<usize>() {
-                    previous_rtt = Duration::from_millis(rtt_int.try_into().unwrap());
-                }
-            }
-        } else {
-            enabled = false;
-        }
-
-        if let Some(no_sr_oss) = std::env::var_os("DISABLE_SR")
-        {
-            if let Ok(no_sr_string) = no_sr_oss.into_string() {
-                if let Ok(no_sr_int) = no_sr_string.parse::<usize>() {
-                    if no_sr_int == 1 {
-                        println!("Disabling SR");
-                        use_sr = false;
-                    }
-                }
-            }
-        }
 
         Self {
             trace_id: trace_id.to_string(),
@@ -114,8 +81,8 @@ impl Resume {
 
     pub fn setup(&mut self, previous_rtt: Duration, previous_cwnd: usize) {
         self.enabled = true;
-        self.previous_rtt = previous_rtt;
-        self.previous_cwnd = previous_cwnd;
+        self.previous_rtt = Duration::from_millis(600);
+        self.previous_cwnd = 800_000;
         trace!("{} careful resume configured", self.trace_id);
     }
 

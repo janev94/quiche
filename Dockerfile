@@ -1,4 +1,4 @@
-FROM rust:1.66 as build
+FROM rust:1.78-bullseye as build
 
 WORKDIR /build
 
@@ -7,9 +7,9 @@ COPY octets/ ./octets/
 COPY qlog/ ./qlog/
 COPY quiche/ ./quiche/
 
-RUN apt-get update && apt-get install -y cmake && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y libc6 cmake clang && rm -rf /var/lib/apt/lists/*
 
-RUN cargo build --manifest-path apps/Cargo.toml
+RUN cargo build -F boringssl-boring-crate --manifest-path apps/Cargo.toml
 
 ##
 ## quiche-base: quiche image for apps
