@@ -5349,7 +5349,7 @@ impl Connection {
     #[inline]
     pub fn stream_capacity(&self, stream_id: u64) -> Result<usize> {
         if let Some(stream) = self.streams.get(stream_id) {
-            let cap = cmp::min(self.tx_cap, stream.send.cap()?);
+            let cap = stream.send.cap()?; //cmp::min(self.tx_cap, stream.send.cap()?);
             return Ok(cap);
         };
 
@@ -7716,8 +7716,8 @@ impl Connection {
             Err(_) => 0,
         };
 
-        self.tx_cap =
-            cmp::min(cwin_available, self.max_tx_data - self.tx_data) as usize;
+        self.tx_cap = (self.max_tx_data - self.tx_data) as usize;
+            // cmp::min(cwin_available, self.max_tx_data - self.tx_data) as usize;
     }
 
     fn delivery_rate_check_if_app_limited(&self) -> bool {
