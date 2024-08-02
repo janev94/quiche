@@ -32,6 +32,8 @@ pub struct Resume {
     qlog_metrics: QlogMetrics,
     #[cfg(feature = "qlog")]
     last_trigger: Option<CarefulResumeTrigger>,
+
+    use_sr: bool,
 }
 
 impl std::fmt::Debug for Resume {
@@ -50,6 +52,7 @@ impl Resume {
 
         // enabled will become false if either of the required CR ENV VARS is not supplied
         let mut enabled = true;
+        let mut use_sr = true;
 
         let mut previous_rtt = Duration::ZERO;
         let mut previous_cwnd = 0;
@@ -76,6 +79,18 @@ impl Resume {
             enabled = false;
         }
 
+        if let Some(no_sr_oss) = std::env::var_os("DISABLE_SR")
+        {
+            if let Ok(no_sr_string) = no_sr_oss.into_string() {
+                if let Ok(no_sr_int) = no_sr_string.parse::<usize>() {
+                    if no_sr_int == 1 {
+                        println!("Disabling SR");
+                        use_sr = false;
+                    }
+                }
+            }
+        }
+
         Self {
             trace_id: trace_id.to_string(),
             enabled: enabled,
@@ -87,7 +102,8 @@ impl Resume {
             #[cfg(feature = "qlog")]
             qlog_metrics: QlogMetrics::default(),
             #[cfg(feature = "qlog")]
-            last_trigger: None
+            last_trigger: None,
+            use_sr,
         }
     }
 
@@ -218,16 +234,27 @@ impl Resume {
 
                 // TODO: mark used CR parameters as invalid for future connections
 
-                self.change_state(CrState::SafeRetreat(largest_pkt_sent), CarefulResumeTrigger::PacketLoss);
-                self.pipesize / 2
+                if self.use_sr {
+                    self.change_state(CrState::SafeRetreat(largest_pkt_sent), CarefulResumeTrigger::PacketLoss);
+                    self.pipesize / 2
+                } else {
+                    self.change_state(CrState::Normal, CarefulResumeTrigger::PacketLoss);
+                    0
+                }
             }
             CrState::Validating(p) => {
                 trace!("{} congestion during validating phase", self.trace_id);
 
                 // TODO: mark used CR parameters as invalid for future connections
 
-                self.change_state(CrState::SafeRetreat(p), CarefulResumeTrigger::PacketLoss);
-                self.pipesize / 2
+                if self.use_sr {
+                    self.change_state(CrState::SafeRetreat(p), CarefulResumeTrigger::PacketLoss);
+                    self.pipesize / 2
+                } else {
+                    self.change_state(CrState::Normal, CarefulResumeTrigger::PacketLoss);
+                    0
+                }
+
             }
             CrState::Reconnaissance => {
                 trace!("{} congestion during reconnaissance - abandoning careful resume", self.trace_id);
