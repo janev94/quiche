@@ -150,8 +150,11 @@ fn autoindex(path: path::PathBuf, index: &str) -> path::PathBuf {
 pub fn make_qlog_writer(
     dir: &std::ffi::OsStr, role: &str, id: &str,
 ) -> std::io::BufWriter<std::fs::File> {
+    // Add UNIX timestamp to name so multiple qlogs are easily sortable by creation time
+    let time_offset = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
+
     let mut path = std::path::PathBuf::from(dir);
-    let filename = format!("{role}-{id}.sqlog");
+    let filename = format!("{time_offset}_{role}-{id}.sqlog");
     path.push(filename);
 
     match std::fs::File::create(&path) {
