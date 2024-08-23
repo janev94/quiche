@@ -146,7 +146,9 @@ impl State {
     }
 }
 
-fn on_init(_r: &mut Congestion) {}
+fn on_init(_r: &mut Congestion) {
+    _r.hystart.cc_state = 0;
+}
 
 fn on_packet_sent(
     r: &mut Congestion, sent_bytes: usize, bytes_in_flight: usize, now: Instant,
@@ -260,6 +262,7 @@ fn on_packet_acked(
             r.ssthresh = r.congestion_window;
         }
     } else {
+        r.hystart.cc_state = 2;
         // Congestion avoidance.
         let ca_start_time;
 
