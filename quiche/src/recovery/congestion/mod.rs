@@ -198,9 +198,18 @@ impl Congestion {
         if !(self.cc_ops.has_custom_pacing)() &&
             rtt_stats.first_rtt_sample.is_some()
         {
-            let rate = PACING_MULTIPLIER * self.congestion_window as f64 /
-                rtt_stats.rtt().as_secs_f64();
-            self.set_pacing_rate(rate as u64, now);
+           if self.resume.get_state() == resume::CrState::Normal {
+               let rate = PACING_MULTIPLIER * self.congestion_window as f64 /
+                   rtt_stats.rtt().as_secs_f64();
+               self.set_pacing_rate(rate as u64, now);
+           } else {
+               let rate = PACING_MULTIPLIER * f64::max(self.congestion_window as f64, self.resume.get_previous_cwnd() as f64 / 2.0) /
+                   rtt_stats.rtt().as_secs_f64();
+               self.set_pacing_rate(rate as u64, now);
+           }
+
+
+           
         }
 
         self.schedule_next_packet(now, sent_bytes);
