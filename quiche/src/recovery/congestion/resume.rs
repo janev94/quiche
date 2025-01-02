@@ -32,6 +32,10 @@ pub struct Resume {
     qlog_metrics: QlogMetrics,
     #[cfg(feature = "qlog")]
     last_trigger: Option<CarefulResumeTrigger>,
+    #[cfg(feature = "qlog")]
+    first_unvalidated_packet: u64,
+    #[cfg(feature = "qlog")]
+    last_unvalidated_packet: u64,
 
     use_sr: bool,
 }
@@ -100,6 +104,10 @@ impl Resume {
             qlog_metrics: QlogMetrics::default(),
             #[cfg(feature = "qlog")]
             last_trigger: None,
+            #[cfg(feature = "qlog")]
+            first_unvalidated_packet: 0,
+            #[cfg(feature = "qlog")]
+            last_unvalidated_packet: 0,
             use_sr,
         }
     }
@@ -199,6 +207,10 @@ impl Resume {
         &mut self, rtt_sample: Option<Duration>, cwnd: usize,
         largest_pkt_sent: u64, app_limited: bool, iw_acked: bool,
     ) -> usize {
+        #[cfg(feature = "qlog")]
+        {
+            self.last_unvalidated_packet = largest_pkt_sent;
+        }
         // Do nothing when data limited to avoid having insufficient data
         // to be able to validate transmission at a higher rate
         if app_limited {
@@ -247,6 +259,10 @@ impl Resume {
                 "{} entering careful resume unvalidated phase",
                 self.trace_id
             );
+            #[cfg(feature = "qlog")]
+            {
+                self.first_unvalidated_packet = largest_pkt_sent;
+            }
             self.change_state(
                 CrState::Unvalidated(largest_pkt_sent),
                 CarefulResumeTrigger::CongestionWindowLimited,
@@ -319,6 +335,8 @@ impl Resume {
         let qlog_metrics = QlogMetrics {
             state: Some(self.cr_state),
             pipesize: self.pipesize as u64,
+            first_unvalidated_packet: self.first_unvalidated_packet,
+            last_unvalidated_packet: self.last_unvalidated_packet,
             cwnd: cwnd as u64,
             ssthresh: ssthresh as u64,
             trigger: self.last_trigger,
@@ -425,6 +443,8 @@ pub struct CREvent {
 struct QlogMetrics {
     state: Option<CrState>,
     pipesize: u64,
+    first_unvalidated_packet: u64,
+    last_unvalidated_packet: u64,
     cwnd: u64,
     ssthresh: u64,
     trigger: Option<CarefulResumeTrigger>,
@@ -460,6 +480,8 @@ impl QlogMetrics {
                 self.state = Some(new_state);
                 self.pipesize = latest.pipesize;
                 self.trigger = latest.trigger;
+                self.first_unvalidated_packet = latest.first_unvalidated_packet;
+                self.last_unvalidated_packet = latest.last_unvalidated_packet;
                 self.cwnd = latest.cwnd;
                 self.ssthresh = latest.ssthresh;
                 self.saved_rtt = latest.saved_rtt;
@@ -471,10 +493,10 @@ impl QlogMetrics {
                         new_phase: Self::map_state(new_state),
                         state_data: CarefulResumeStateParameters {
                             pipesize: latest.pipesize,
-                            first_unvalidated_packet: Self::map_cr_mark(
-                                new_state,
-                            ), // FIXME: save first and last unvalidated packet in CrState
-                            last_unvalidated_packet: 0,
+                            first_unvalidated_packet: latest
+                                .first_unvalidated_packet,
+                            last_unvalidated_packet: latest
+                                .last_unvalidated_packet,
                             congestion_window: Some(latest.cwnd),
                             ssthresh: Some(latest.ssthresh),
                         },
