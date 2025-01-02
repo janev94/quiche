@@ -148,7 +148,7 @@ impl Resume {
                         trace!("{} careful resume complete", self.trace_id);
                         self.change_state(
                             CrState::Normal,
-                            CarefulResumeTrigger::CrMarkAcknowledged,
+                            CarefulResumeTrigger::LastUnvalidatedPacketAcknowledged,
                         );
                         (Some(self.pipesize), None)
                     } else {
@@ -159,7 +159,7 @@ impl Resume {
                         // Store the last packet number that was sent in the Unvalidated Phase
                         self.change_state(
                             CrState::Validating(largest_pkt_sent),
-                            CarefulResumeTrigger::CrMarkAcknowledged,
+                            CarefulResumeTrigger::FirstUnvalidatedPacketAcknowledged,
                         );
                         (Some(flightsize), None)
                     }
@@ -173,7 +173,7 @@ impl Resume {
                     trace!("{} careful resume complete", self.trace_id);
                     self.change_state(
                         CrState::Normal,
-                        CarefulResumeTrigger::CrMarkAcknowledged,
+                        CarefulResumeTrigger::LastUnvalidatedPacketAcknowledged,
                     );
                 }
                 (None, None)
@@ -213,7 +213,7 @@ impl Resume {
             if jump == 0 {
                 self.change_state(
                     CrState::Normal,
-                    CarefulResumeTrigger::CwndLimited,
+                    CarefulResumeTrigger::CongestionWindowLimited,
                 );
                 return 0;
             }
@@ -249,7 +249,7 @@ impl Resume {
             );
             self.change_state(
                 CrState::Unvalidated(largest_pkt_sent),
-                CarefulResumeTrigger::CwndLimited,
+                CarefulResumeTrigger::CongestionWindowLimited,
             );
             self.pipesize = cwnd;
             // we return the jump in window, CC code handles the increase in cwnd
@@ -322,8 +322,8 @@ impl Resume {
             cwnd: cwnd as u64,
             ssthresh: ssthresh as u64,
             trigger: self.last_trigger,
-            previous_rtt: self.previous_rtt,
-            previous_cwnd: self.previous_cwnd as u64,
+            saved_rtt: self.previous_rtt,
+            saved_cwnd: self.previous_cwnd as u64,
         };
 
         self.qlog_metrics.maybe_update(qlog_metrics)
@@ -428,8 +428,8 @@ struct QlogMetrics {
     cwnd: u64,
     ssthresh: u64,
     trigger: Option<CarefulResumeTrigger>,
-    previous_rtt: Duration,
-    previous_cwnd: u64,
+    saved_rtt: Duration,
+    saved_cwnd: u64,
 }
 
 #[cfg(feature = "qlog")]
@@ -462,25 +462,28 @@ impl QlogMetrics {
                 self.trigger = latest.trigger;
                 self.cwnd = latest.cwnd;
                 self.ssthresh = latest.ssthresh;
-                self.previous_rtt = latest.previous_rtt;
-                self.previous_cwnd = latest.previous_cwnd;
+                self.saved_rtt = latest.saved_rtt;
+                self.saved_cwnd = latest.saved_cwnd;
 
                 Some(EventData::CarefulResumePhaseUpdated(
                     CarefulResumePhaseUpdated {
-                        old: old_state.map(Self::map_state),
-                        new: Self::map_state(new_state),
+                        old_phase: old_state.map(Self::map_state),
+                        new_phase: Self::map_state(new_state),
                         state_data: CarefulResumeStateParameters {
                             pipesize: latest.pipesize,
-                            cr_mark: Self::map_cr_mark(new_state),
+                            first_unvalidated_packet: Self::map_cr_mark(
+                                new_state,
+                            ), // FIXME: save first and last unvalidated packet in CrState
+                            last_unvalidated_packet: 0,
                             congestion_window: Some(latest.cwnd),
                             ssthresh: Some(latest.ssthresh),
                         },
-                        restored_data: if latest.previous_rtt != Duration::ZERO
-                            || latest.previous_cwnd != 0
+                        restored_data: if latest.saved_rtt != Duration::ZERO
+                            || latest.saved_cwnd != 0
                         {
                             Some(CarefulResumeRestoredParameters {
-                                previous_congestion_window: latest.previous_cwnd,
-                                previous_rtt: latest.previous_rtt.as_secs_f32()
+                                saved_congestion_window: latest.saved_cwnd,
+                                saved_rtt: latest.saved_rtt.as_secs_f32()
                                     * 1000.0,
                             })
                         } else {
