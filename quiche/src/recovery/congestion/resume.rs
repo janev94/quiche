@@ -1,8 +1,8 @@
-use std::time::{Duration, Instant};
-use qlog::events::EventData;
-use qlog::events::resume::*;
 use crate::recovery::Acked;
+use qlog::events::resume::*;
+use qlog::events::EventData;
 use std::convert::TryInto;
+use std::time::{Duration, Instant};
 
 const CR_EVENT_MAXIMUM_GAP: Duration = Duration::from_secs(60);
 
@@ -49,7 +49,6 @@ impl std::fmt::Debug for Resume {
 
 impl Resume {
     pub fn new(trace_id: &str) -> Self {
-
         // enabled will become false if either of the required CR ENV VARS is not supplied
         let mut enabled = true;
         let mut use_sr = true;
@@ -57,8 +56,7 @@ impl Resume {
         let mut previous_rtt = Duration::ZERO;
         let mut previous_cwnd = 0;
 
-        if let Some(jw_oss) = std::env::var_os("PREVIOUS_CWND_BYTES")
-        {
+        if let Some(jw_oss) = std::env::var_os("PREVIOUS_CWND_BYTES") {
             if let Ok(jw_string) = jw_oss.into_string() {
                 if let Ok(jw_int) = jw_string.parse::<usize>() {
                     previous_cwnd = jw_int;
@@ -68,19 +66,18 @@ impl Resume {
             enabled = false;
         }
 
-        if let Some(rtt_oss) = std::env::var_os("PREVIOUS_RTT") 
-        {
+        if let Some(rtt_oss) = std::env::var_os("PREVIOUS_RTT") {
             if let Ok(rtt_string) = rtt_oss.into_string() {
                 if let Ok(rtt_int) = rtt_string.parse::<usize>() {
-                    previous_rtt = Duration::from_millis(rtt_int.try_into().unwrap());
+                    previous_rtt =
+                        Duration::from_millis(rtt_int.try_into().unwrap());
                 }
             }
         } else {
             enabled = false;
         }
 
-        if let Some(no_sr_oss) = std::env::var_os("DISABLE_SR")
-        {
+        if let Some(no_sr_oss) = std::env::var_os("DISABLE_SR") {
             if let Ok(no_sr_string) = no_sr_oss.into_string() {
                 if let Ok(no_sr_int) = no_sr_string.parse::<usize>() {
                     if no_sr_int == 1 {
@@ -93,10 +90,10 @@ impl Resume {
 
         Self {
             trace_id: trace_id.to_string(),
-            enabled: enabled,
+            enabled,
             cr_state: CrState::default(),
-            previous_rtt: previous_rtt,
-            previous_cwnd: previous_cwnd,
+            previous_rtt,
+            previous_cwnd,
             pipesize: 0,
             total_acked: 0,
             #[cfg(feature = "qlog")]
@@ -132,14 +129,15 @@ impl Resume {
     #[inline]
     fn change_state(&mut self, state: CrState, trigger: CarefulResumeTrigger) {
         self.cr_state = state;
-        #[cfg(feature = "qlog")] {
+        #[cfg(feature = "qlog")]
+        {
             self.last_trigger = Some(trigger);
         }
     }
 
     // Returns (new_cwnd, new_ssthresh), both optional
     pub fn process_ack(
-        &mut self, largest_pkt_sent: u64, packet: &Acked, flightsize: usize
+        &mut self, largest_pkt_sent: u64, packet: &Acked, flightsize: usize,
     ) -> (Option<usize>, Option<usize>) {
         self.total_acked += packet.size;
         match self.cr_state {
@@ -148,42 +146,58 @@ impl Resume {
                 if packet.pkt_num >= first_packet {
                     if flightsize <= self.pipesize {
                         trace!("{} careful resume complete", self.trace_id);
-                        self.change_state(CrState::Normal, CarefulResumeTrigger::CrMarkAcknowledged);
+                        self.change_state(
+                            CrState::Normal,
+                            CarefulResumeTrigger::CrMarkAcknowledged,
+                        );
                         (Some(self.pipesize), None)
                     } else {
-                        trace!("{} entering careful resume validating phase", self.trace_id);
+                        trace!(
+                            "{} entering careful resume validating phase",
+                            self.trace_id
+                        );
                         // Store the last packet number that was sent in the Unvalidated Phase
-                        self.change_state(CrState::Validating(largest_pkt_sent), CarefulResumeTrigger::CrMarkAcknowledged);
+                        self.change_state(
+                            CrState::Validating(largest_pkt_sent),
+                            CarefulResumeTrigger::CrMarkAcknowledged,
+                        );
                         (Some(flightsize), None)
                     }
                 } else {
                     (None, None)
                 }
-            }
+            },
             CrState::Validating(last_packet) => {
                 self.pipesize += packet.size;
                 if packet.pkt_num >= last_packet {
                     trace!("{} careful resume complete", self.trace_id);
-                    self.change_state(CrState::Normal, CarefulResumeTrigger::CrMarkAcknowledged);
+                    self.change_state(
+                        CrState::Normal,
+                        CarefulResumeTrigger::CrMarkAcknowledged,
+                    );
                 }
                 (None, None)
-            }
+            },
             CrState::SafeRetreat(last_packet) => {
                 if packet.pkt_num >= last_packet {
                     trace!("{} careful resume complete", self.trace_id);
-                    self.change_state(CrState::Normal, CarefulResumeTrigger::ExitRecovery);
+                    self.change_state(
+                        CrState::Normal,
+                        CarefulResumeTrigger::ExitRecovery,
+                    );
                     (None, Some(self.pipesize))
                 } else {
                     self.pipesize += packet.size;
                     (None, None)
                 }
-            }
-            _ => (None, None)
+            },
+            _ => (None, None),
         }
     }
 
     pub fn send_packet(
-        &mut self, rtt_sample: Option<Duration>, cwnd: usize, largest_pkt_sent: u64, app_limited: bool, iw_acked: bool
+        &mut self, rtt_sample: Option<Duration>, cwnd: usize,
+        largest_pkt_sent: u64, app_limited: bool, iw_acked: bool,
     ) -> usize {
         // Do nothing when data limited to avoid having insufficient data
         // to be able to validate transmission at a higher rate
@@ -197,7 +211,10 @@ impl Resume {
             let jump = (self.previous_cwnd / 2).saturating_sub(cwnd);
 
             if jump == 0 {
-                self.change_state(CrState::Normal, CarefulResumeTrigger::CwndLimited);
+                self.change_state(
+                    CrState::Normal,
+                    CarefulResumeTrigger::CwndLimited,
+                );
                 return 0;
             }
 
@@ -206,23 +223,34 @@ impl Resume {
                 None => {
                     // Don't make any decisions until we have an RTT sample
                     return 0;
-                }
+                },
             };
 
             // Confirm RTT is similar to that of the previous connection
-            if current_rtt <= self.previous_rtt / 2 || current_rtt >= self.previous_rtt * 10 {
+            if current_rtt <= self.previous_rtt / 2
+                || current_rtt >= self.previous_rtt * 10
+            {
                 trace!(
                     "{} current RTT too divergent from previous RTT - not using careful resume; \
                     rtt_sample={:?} previous_rtt={:?}",
                     self.trace_id, current_rtt, self.previous_rtt
                 );
-                self.change_state(CrState::Normal, CarefulResumeTrigger::RttNotValidated);
+                self.change_state(
+                    CrState::Normal,
+                    CarefulResumeTrigger::RttNotValidated,
+                );
                 return 0;
             }
 
             // Store the first packet number that was sent in the Unvalidated Phase
-            trace!("{} entering careful resume unvalidated phase", self.trace_id);
-            self.change_state(CrState::Unvalidated(largest_pkt_sent), CarefulResumeTrigger::CwndLimited);
+            trace!(
+                "{} entering careful resume unvalidated phase",
+                self.trace_id
+            );
+            self.change_state(
+                CrState::Unvalidated(largest_pkt_sent),
+                CarefulResumeTrigger::CwndLimited,
+            );
             self.pipesize = cwnd;
             // we return the jump in window, CC code handles the increase in cwnd
             return jump;
@@ -239,41 +267,55 @@ impl Resume {
                 // TODO: mark used CR parameters as invalid for future connections
 
                 if self.use_sr {
-                    self.change_state(CrState::SafeRetreat(largest_pkt_sent), CarefulResumeTrigger::PacketLoss);
+                    self.change_state(
+                        CrState::SafeRetreat(largest_pkt_sent),
+                        CarefulResumeTrigger::PacketLoss,
+                    );
                     self.pipesize / 2
                 } else {
-                    self.change_state(CrState::Normal, CarefulResumeTrigger::PacketLoss);
+                    self.change_state(
+                        CrState::Normal,
+                        CarefulResumeTrigger::PacketLoss,
+                    );
                     0
                 }
-            }
+            },
             CrState::Validating(p) => {
                 trace!("{} congestion during validating phase", self.trace_id);
 
                 // TODO: mark used CR parameters as invalid for future connections
 
                 if self.use_sr {
-                    self.change_state(CrState::SafeRetreat(p), CarefulResumeTrigger::PacketLoss);
+                    self.change_state(
+                        CrState::SafeRetreat(p),
+                        CarefulResumeTrigger::PacketLoss,
+                    );
                     self.pipesize / 2
                 } else {
-                    self.change_state(CrState::Normal, CarefulResumeTrigger::PacketLoss);
+                    self.change_state(
+                        CrState::Normal,
+                        CarefulResumeTrigger::PacketLoss,
+                    );
                     0
                 }
-
-            }
+            },
             CrState::Reconnaissance => {
                 trace!("{} congestion during reconnaissance - abandoning careful resume", self.trace_id);
 
-                self.change_state(CrState::Normal, CarefulResumeTrigger::PacketLoss);
+                self.change_state(
+                    CrState::Normal,
+                    CarefulResumeTrigger::PacketLoss,
+                );
                 0
-            }
-            _ => {
-                0
-            }
+            },
+            _ => 0,
         }
     }
 
     #[cfg(feature = "qlog")]
-    pub fn maybe_qlog(&mut self, cwnd: usize, ssthresh: usize) -> Option<EventData> {
+    pub fn maybe_qlog(
+        &mut self, cwnd: usize, ssthresh: usize,
+    ) -> Option<EventData> {
         let qlog_metrics = QlogMetrics {
             state: Some(self.cr_state),
             pipesize: self.pipesize as u64,
@@ -308,7 +350,9 @@ impl CRMetrics {
     }
 
     // Implementation of the CR observe phase
-    pub fn maybe_update(&mut self, new_min_rtt: Duration, new_cwnd: usize) -> Option<CREvent> {
+    pub fn maybe_update(
+        &mut self, new_min_rtt: Duration, new_cwnd: usize,
+    ) -> Option<CREvent> {
         // Initial guess at something that might work, needs further research
         let now = Instant::now();
         let time_since_last_update = now - self.last_update;
@@ -337,14 +381,19 @@ impl CRMetrics {
                 let new_min_rtt_micros = new_min_rtt.as_micros() as f64;
                 let new_cwnd_float = new_cwnd as f64;
 
-                new_min_rtt_micros < min_rtt_range_min || new_min_rtt_micros > min_rtt_range_max ||
-                    new_cwnd_float < cwnd_range_min || new_cwnd_float > cwnd_range_max
+                new_min_rtt_micros < min_rtt_range_min
+                    || new_min_rtt_micros > min_rtt_range_max
+                    || new_cwnd_float < cwnd_range_min
+                    || new_cwnd_float > cwnd_range_max
             }
         };
 
         trace!(
             "{} maybe_update(new_min_rtt={:?}, new_cwnd={}); updating={}",
-            self.trace_id, new_min_rtt, new_cwnd, should_update
+            self.trace_id,
+            new_min_rtt,
+            new_cwnd,
+            should_update
         );
 
         if should_update {
@@ -398,7 +447,9 @@ impl QlogMetrics {
     fn map_cr_mark(state: CrState) -> u64 {
         match state {
             CrState::Reconnaissance | CrState::Normal => 0,
-            CrState::Unvalidated(m) | CrState::Validating(m) | CrState::SafeRetreat(m) => m,
+            CrState::Unvalidated(m)
+            | CrState::Validating(m)
+            | CrState::SafeRetreat(m) => m,
         }
     }
 
@@ -414,25 +465,30 @@ impl QlogMetrics {
                 self.previous_rtt = latest.previous_rtt;
                 self.previous_cwnd = latest.previous_cwnd;
 
-                Some(EventData::CarefulResumePhaseUpdated(CarefulResumePhaseUpdated {
-                    old: old_state.map(Self::map_state),
-                    new: Self::map_state(new_state),
-                    state_data: CarefulResumeStateParameters {
-                        pipesize: latest.pipesize,
-                        cr_mark: Self::map_cr_mark(new_state),
-                        congestion_window: Some(latest.cwnd),
-                        ssthresh: Some(latest.ssthresh),
+                Some(EventData::CarefulResumePhaseUpdated(
+                    CarefulResumePhaseUpdated {
+                        old: old_state.map(Self::map_state),
+                        new: Self::map_state(new_state),
+                        state_data: CarefulResumeStateParameters {
+                            pipesize: latest.pipesize,
+                            cr_mark: Self::map_cr_mark(new_state),
+                            congestion_window: Some(latest.cwnd),
+                            ssthresh: Some(latest.ssthresh),
+                        },
+                        restored_data: if latest.previous_rtt != Duration::ZERO
+                            || latest.previous_cwnd != 0
+                        {
+                            Some(CarefulResumeRestoredParameters {
+                                previous_congestion_window: latest.previous_cwnd,
+                                previous_rtt: latest.previous_rtt.as_secs_f32()
+                                    * 1000.0,
+                            })
+                        } else {
+                            None
+                        },
+                        trigger: latest.trigger,
                     },
-                    restored_data: if latest.previous_rtt != Duration::ZERO || latest.previous_cwnd != 0 {
-                        Some(CarefulResumeRestoredParameters {
-                            previous_congestion_window: latest.previous_cwnd,
-                            previous_rtt: latest.previous_rtt.as_secs_f32() * 1000.0
-                        })
-                    } else {
-                        None
-                    },
-                    trigger: latest.trigger,
-                }))
+                ))
             } else {
                 None
             }
@@ -444,10 +500,10 @@ impl QlogMetrics {
 
 #[cfg(test)]
 mod tests {
-    use smallvec::smallvec;
-    use crate::{CongestionControlAlgorithm, packet, ranges};
-    use crate::recovery::{HandshakeStatus, Recovery, Sent};
     use super::*;
+    use crate::recovery::{HandshakeStatus, Recovery, Sent};
+    use crate::{packet, ranges, CongestionControlAlgorithm};
+    use smallvec::smallvec;
 
     // for cwnd > jump window, check crstate moves to normal
     #[test]
@@ -483,7 +539,13 @@ mod tests {
     fn valid_rtt() {
         let mut r = Resume::new("");
         r.setup(Duration::from_millis(50), 80_000);
-        let jump = r.send_packet(Some(Duration::from_millis(60)), 20_500, 20, false, true);
+        let jump = r.send_packet(
+            Some(Duration::from_millis(60)),
+            20_500,
+            20,
+            false,
+            true,
+        );
         assert_eq!(jump, 19_500);
 
         assert_eq!(r.cr_state, CrState::Unvalidated(20));
@@ -539,7 +601,10 @@ mod tests {
                 now,
                 "",
             );
-            assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), i + 1);
+            assert_eq!(
+                r.epochs[packet::Epoch::Application].sent_packets.len(),
+                i + 1
+            );
             assert_eq!(r.bytes_in_flight, 1200 * (i + 1));
         }
 
@@ -586,7 +651,10 @@ mod tests {
                 now,
                 "",
             );
-            assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), i + 1);
+            assert_eq!(
+                r.epochs[packet::Epoch::Application].sent_packets.len(),
+                i + 1
+            );
             assert_eq!(r.bytes_in_flight, 1000 * (i + 1));
         }
 
@@ -639,7 +707,10 @@ mod tests {
                 now,
                 "",
             );
-            assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), i + 1);
+            assert_eq!(
+                r.epochs[packet::Epoch::Application].sent_packets.len(),
+                i + 1
+            );
             assert_eq!(r.bytes_in_flight, 1000 * (i + 1));
         }
 
@@ -648,7 +719,6 @@ mod tests {
         assert_eq!(r.congestion.resume.cr_state, CrState::Unvalidated(15));
         assert_eq!(r.congestion.resume.pipesize, 12_000);
     }
-
 
     #[test]
     fn valid_rtt_full_cubic() {
@@ -691,7 +761,10 @@ mod tests {
                 now,
                 "",
             );
-            assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), i + 1);
+            assert_eq!(
+                r.epochs[packet::Epoch::Application].sent_packets.len(),
+                i + 1
+            );
             assert_eq!(r.bytes_in_flight, 1000 * (i + 1));
         }
 
@@ -742,7 +815,10 @@ mod tests {
                 now,
                 "",
             );
-            assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), i + 1);
+            assert_eq!(
+                r.epochs[packet::Epoch::Application].sent_packets.len(),
+                i + 1
+            );
             assert_eq!(r.bytes_in_flight, 1000 * (i + 1));
         }
 
@@ -802,7 +878,10 @@ mod tests {
                 now,
                 "",
             );
-            assert_eq!(r.congestion.sent[packet::Epoch::Application].len(), i + 1);
+            assert_eq!(
+                r.congestion.sent[packet::Epoch::Application].len(),
+                i + 1
+            );
             assert_eq!(r.bytes_in_flight, max_datagram_size * (i + 1));
         }
 
@@ -869,7 +948,6 @@ mod tests {
         assert_eq!(false, r.congestion.app_limited);
         // make sure we are still in reconnaissance
         assert_eq!(r.congestion.resume.cr_state, CrState::Reconnaissance);
-
 
         let mut acked = ranges::RangeSet::default();
         acked.insert(0..10 as u64);
@@ -946,8 +1024,6 @@ mod tests {
 
         assert_eq!(r.congestion.resume.cr_state, CrState::Unvalidated(31));
         assert_eq!(r.cwnd(), 300_000);
-
-
     }
     #[test]
     fn invalid_rtt_full() {
@@ -989,7 +1065,10 @@ mod tests {
                 now,
                 "",
             );
-            assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), i + 1);
+            assert_eq!(
+                r.epochs[packet::Epoch::Application].sent_packets.len(),
+                i + 1
+            );
             assert_eq!(r.bytes_in_flight, 1200 * (i + 1));
         }
 
@@ -1040,7 +1119,10 @@ mod tests {
                 now,
                 "",
             );
-            assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), i + 1);
+            assert_eq!(
+                r.epochs[packet::Epoch::Application].sent_packets.len(),
+                i + 1
+            );
             assert_eq!(r.bytes_in_flight, 1000 * (i + 1));
         }
         assert_eq!(r.congestion.resume.cr_state, CrState::Normal);
@@ -1086,7 +1168,10 @@ mod tests {
                 now,
                 "",
             );
-            assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), i + 1);
+            assert_eq!(
+                r.epochs[packet::Epoch::Application].sent_packets.len(),
+                i + 1
+            );
             assert_eq!(r.bytes_in_flight, 1200 * (i + 1));
         }
 
@@ -1137,10 +1222,12 @@ mod tests {
                 now,
                 "",
             );
-            assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), i + 1);
+            assert_eq!(
+                r.epochs[packet::Epoch::Application].sent_packets.len(),
+                i + 1
+            );
             assert_eq!(r.bytes_in_flight, 1200 * (i + 1));
             assert_eq!(r.congestion.congestion_window, 56_400);
-
         }
         assert_eq!(r.congestion.resume.cr_state, CrState::Normal);
     }
@@ -1151,7 +1238,6 @@ mod tests {
         cfg.set_cc_algorithm(CongestionControlAlgorithm::Reno);
         cfg.enable_resume(true);
         cfg.enable_hystart(true);
-
 
         let mut r = Recovery::new(&cfg, "");
         let mut now = Instant::now();
@@ -1187,7 +1273,10 @@ mod tests {
                 now,
                 "",
             );
-            assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), i + 1);
+            assert_eq!(
+                r.epochs[packet::Epoch::Application].sent_packets.len(),
+                i + 1
+            );
             assert_eq!(r.bytes_in_flight, 1000 * (i + 1));
         }
 
@@ -1221,7 +1310,6 @@ mod tests {
         cfg.enable_resume(true);
         cfg.enable_hystart(true);
 
-
         let mut r = Recovery::new(&cfg, "");
         let mut now = Instant::now();
 
@@ -1256,7 +1344,10 @@ mod tests {
                 now,
                 "",
             );
-            assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), i + 1);
+            assert_eq!(
+                r.epochs[packet::Epoch::Application].sent_packets.len(),
+                i + 1
+            );
             assert_eq!(r.bytes_in_flight, 1000 * (i + 1));
         }
 
@@ -1290,20 +1381,23 @@ mod tests {
         let now = Instant::now();
 
         r.setup(Duration::from_millis(50), 80_000);
-        r.change_state(CrState::Unvalidated(30), CarefulResumeTrigger::CwndLimited);
+        r.change_state(
+            CrState::Unvalidated(30),
+            CarefulResumeTrigger::CwndLimited,
+        );
 
         let p = Acked {
-           pkt_num: 29,
-           // To exit from recovery
-           time_sent: now,
-           // More than cur_cwnd to increase cwnd
-           size: 2000,
-           delivered: 0,
-           delivered_time: now,
-           first_sent_time: now,
-           is_app_limited: false,
-           rtt: Duration::ZERO,
-       };
+            pkt_num: 29,
+            // To exit from recovery
+            time_sent: now,
+            // More than cur_cwnd to increase cwnd
+            size: 2000,
+            delivered: 0,
+            delivered_time: now,
+            first_sent_time: now,
+            is_app_limited: false,
+            rtt: Duration::ZERO,
+        };
         r.process_ack(35, &p, 5_000);
 
         let p = Acked {
@@ -1321,7 +1415,6 @@ mod tests {
         r.process_ack(35, &p, 5_000);
         assert_eq!(r.pipesize, 4_000);
         assert_eq!(r.cr_state, CrState::Validating(35));
-
     }
 
     #[test]
@@ -1363,7 +1456,10 @@ mod tests {
                 now,
                 "",
             );
-            assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), i + 1);
+            assert_eq!(
+                r.epochs[packet::Epoch::Application].sent_packets.len(),
+                i + 1
+            );
             assert_eq!(r.bytes_in_flight, 1000 * (i + 1));
         }
 
@@ -1414,7 +1510,10 @@ mod tests {
                 now,
                 "",
             );
-            assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), i + 1);
+            assert_eq!(
+                r.epochs[packet::Epoch::Application].sent_packets.len(),
+                i + 1
+            );
             assert_eq!(r.bytes_in_flight, 1000 * (i + 1));
         }
 
@@ -1517,7 +1616,10 @@ mod tests {
                 now,
                 "",
             );
-            assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), i + 1);
+            assert_eq!(
+                r.epochs[packet::Epoch::Application].sent_packets.len(),
+                i + 1
+            );
             assert_eq!(r.bytes_in_flight, 1000 * (i + 1));
         }
 
@@ -1570,7 +1672,10 @@ mod tests {
                 now,
                 "",
             );
-            assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), i + 1);
+            assert_eq!(
+                r.epochs[packet::Epoch::Application].sent_packets.len(),
+                i + 1
+            );
             assert_eq!(r.bytes_in_flight, 1000 * (i + 1));
         }
 
@@ -1664,7 +1769,10 @@ mod tests {
                 now,
                 "",
             );
-            assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), i + 1);
+            assert_eq!(
+                r.epochs[packet::Epoch::Application].sent_packets.len(),
+                i + 1
+            );
             assert_eq!(r.bytes_in_flight, 1000 * (i + 1));
         }
 
@@ -1717,7 +1825,10 @@ mod tests {
                 now,
                 "",
             );
-            assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), i + 1);
+            assert_eq!(
+                r.epochs[packet::Epoch::Application].sent_packets.len(),
+                i + 1
+            );
             assert_eq!(r.bytes_in_flight, 1000 * (i + 1));
         }
 

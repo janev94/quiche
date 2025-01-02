@@ -8,16 +8,16 @@ pub struct CarefulResumePhaseUpdated {
     pub new: CarefulResumePhase,
     pub state_data: CarefulResumeStateParameters,
     pub restored_data: Option<CarefulResumeRestoredParameters>,
-    pub trigger: Option<CarefulResumeTrigger>
+    pub trigger: Option<CarefulResumeTrigger>,
 }
 
 #[derive(Serialize, Deserialize, Copy, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum CarefulResumeTrigger {
-    PacketLoss, // Loss triggers moving to safe retreat
-    CwndLimited, // Trigger for moving to unvalidated
+    PacketLoss,         // Loss triggers moving to safe retreat
+    CwndLimited,        // Trigger for moving to unvalidated
     CrMarkAcknowledged, // Trigger for moving to validating or normal
-    RttNotValidated, // Trigger for moving to normal, when CR not allowed
+    RttNotValidated,    // Trigger for moving to normal, when CR not allowed
     #[serde(rename = "ECN_CE")]
     EcnCe, // Trigger for moving to safe retreat.
     ExitRecovery, // Trigger for moving to normal 1rtt after a congestion event
