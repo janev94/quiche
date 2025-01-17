@@ -1596,7 +1596,9 @@ pub struct Connection {
 
     cr_event: Option<recovery::CREvent>,
 
-    default_stream_window: Option<u64>
+    default_stream_window: Option<u64>,
+
+    using_resume: bool,
 }
 
 /// Creates a new server-side connection.
@@ -2056,6 +2058,8 @@ impl Connection {
             cr_event: None,
 
             default_stream_window: None,
+
+            using_resume: config.resume,
         };
 
         if let Some(odcid) = odcid {
@@ -2168,6 +2172,8 @@ impl Connection {
 
         self.qlog.level = level;
 
+        let time_offset = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
+
         let trace = qlog::TraceSeq::new(
             qlog::VantagePoint {
                 name: None,
@@ -2177,7 +2183,7 @@ impl Connection {
             Some(title.to_string()),
             Some(description.to_string()),
             Some(qlog::Configuration {
-                time_offset: Some(0.0),
+                time_offset: Some(time_offset),
                 original_uris: None,
             }),
             None,
