@@ -125,6 +125,10 @@ impl Resume {
         self.cr_state
     }
 
+    pub fn get_previous_cwnd(&self) -> f64 {
+        self.previous_cwnd as f64
+    }
+
     #[inline]
     fn change_state(&mut self, state: CrState, trigger: CarefulResumeTrigger) {
         self.cr_state = state;
