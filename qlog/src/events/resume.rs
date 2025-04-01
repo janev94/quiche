@@ -4,8 +4,8 @@ use serde::Serialize;
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct CarefulResumePhaseUpdated {
-    pub old_phase: Option<CarefulResumePhase>,
-    pub new_phase: CarefulResumePhase,
+    pub old: Option<CarefulResumePhase>,
+    pub new: CarefulResumePhase,
     pub state_data: CarefulResumeStateParameters,
     pub restored_data: Option<CarefulResumeRestoredParameters>,
     pub trigger: Option<CarefulResumeTrigger>,
