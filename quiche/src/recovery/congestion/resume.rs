@@ -265,7 +265,7 @@ impl Resume {
             }
             self.change_state(
                 CrState::Unvalidated(largest_pkt_sent),
-                CarefulResumeTrigger::CongestionWindowLimited,
+                CarefulResumeTrigger::LastUnvalidatedPacketSent,
             );
             self.pipesize = cwnd;
             // we return the jump in window, CC code handles the increase in cwnd
@@ -489,8 +489,8 @@ impl QlogMetrics {
 
                 Some(EventData::CarefulResumePhaseUpdated(
                     CarefulResumePhaseUpdated {
-                        old_phase: old_state.map(Self::map_state),
-                        new_phase: Self::map_state(new_state),
+                        old: old_state.map(Self::map_state),
+                        new: Self::map_state(new_state),
                         state_data: CarefulResumeStateParameters {
                             pipesize: latest.pipesize,
                             first_unvalidated_packet: latest
