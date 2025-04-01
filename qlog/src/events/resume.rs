@@ -14,23 +14,48 @@ pub struct CarefulResumePhaseUpdated {
 #[derive(Serialize, Deserialize, Copy, Clone, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum CarefulResumeTrigger {
-    // for the Unvalidated phase, when no unvalidated packets
-    CongestionWindowLimited, // Trigger for moving to unvalidated
-    // for the Validating phase
+    /// From Recon to Unvalidated
+    /// When sender has confirmed the RTT, has received an ACK for the initial
+    /// data without reported congestion and has more data to send than the CWND
+    /// would allow.
+    #[serde(rename = "cwnd_limited")]
+    CongestionWindowLimited,
+    /// From Recon/Unvalidated to Normal
+    /// If the current_rtt is not confirmed the sender MUST enter the Normal
+    /// Phase.
+    RttNotValidated,
+    /// From Unvalidated to Normal
+    /// Completed sending all packets, e.g., when flight_size is equal to the
+    /// CWND after the jump
+    LastUnvalidatedPacketSent,
+    /// From Unvalidated to Validating
+    /// The sender enters the Validating Phase when an ACK is received for the
+    /// first packet number (or higher) sent in the Unvalidated Phase.
     FirstUnvalidatedPacketAcknowledged,
-    // for the Normal phase and no remaining unvalidated packets to be acknowledged
-    LastUnvalidatedPacketAcknowledged,
-    // for the Normal phase, when CR not allowed
-    RttNotValidated, // Trigger for moving to normal, when CR not allowed
-    // for the Normal phase, when sending fewer unvalidated packets than CWND permits
+    /// From Unvalidated to Validating
+    /// When greater than 1 RTT has passed in Unvalidated Phase.
+    RttExceeded,
+    /// From Unvalidated to Normal
+    /// If the flight_size is less than or equal to the PipeSize sender enters
+    /// Normal Phase.
     RateLimited,
-    // for the Safe Retreat phase, when loss detected
-    PacketLoss, // Loss triggers moving to safe retreat
-    // for the Safe Retreat phase, when ECN congestion experienced reported
+    /// From Validating to Normal
+    /// The sender enters the Normal Phase when an ACK is received for the last
+    /// packet number (or higher) that was sent in the Unvalidated Phase.
+    LastUnvalidatedPacketAcknowledged,
+    /// From Unvalidated/Validating to Safe Retreat
+    /// If a sender determines that congestion was experienced, e.g., packet
+    /// loss, the sender enters the Safe Retreat Phase.
+    PacketLoss,
+    /// From Unvalidated/Validating to Safe Retreat
+    /// If a sender determines that congestion was experienced, e.g., ECN-CE
+    /// marking, sender enters the Safe Retreat Phase.
     #[serde(rename = "ECN_CE")]
-    EcnCe, // Trigger for moving to safe retreat.
-    // for the Normal phase 1 RTT after a congestion event
-    ExitRecovery, // Trigger for moving to normal 1rtt after a congestion event
+    EcnCe,
+    /// From Safe Retreat to Normal
+    /// The sender enters the Normal Phase when the last packet sent in the
+    /// Unvalidated Phase is ACKed.
+    ExitRecovery,
 }
 
 #[derive(Serialize, Deserialize, Copy, Clone, PartialEq, Eq, Debug)]
