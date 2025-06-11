@@ -768,11 +768,11 @@ mod tests {
         let mut now = Instant::now();
 
         // Once the initial handshake is established we have an RTT sample
-        r.update_rtt(Duration::from_millis(50), Duration::from_millis(0), now);
+        r.rtt_stats.update_rtt(Duration::from_millis(50), Duration::from_millis(0), now, true);
 
         r.setup_careful_resume(Duration::from_millis(50), 600_000);
 
-        assert_eq!(r.sent[packet::Epoch::Application].len(), 0);
+        assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), 0);
 
         // Send packets to fill the cwnd
         for i in 0..9 {
@@ -802,7 +802,7 @@ mod tests {
                 now,
                 "",
             );
-            assert_eq!(r.congestion.sent[packet::Epoch::Application].len(), i + 1);
+            assert_eq!(r.epochs[packet::Epoch::Application].sent_packets.len(), i + 1);
             assert_eq!(r.bytes_in_flight, max_datagram_size * (i + 1));
         }
 
@@ -876,14 +876,13 @@ mod tests {
 
         now += Duration::from_millis(50);
 
-        let _ = r.congestion.on_ack_received(
+        let _ = r.on_ack_received(
             &acked,
             0,
             packet::Epoch::Application,
             HandshakeStatus::default(),
             now,
             "",
-            &mut Vec::new(),
         );
 
         // Send enough packets to fill the pipe
