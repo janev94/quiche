@@ -148,12 +148,12 @@ impl Resume {
                 if packet.pkt_num >= first_packet {
                     if flightsize <= self.pipesize {
                         trace!("{} careful resume complete", self.trace_id);
-                        self.change_state(CrState::Normal, CarefulResumeTrigger::CrMarkAcknowledged);
+                        self.change_state(CrState::Normal, CarefulResumeTrigger::LastUnvalidatedPacketAcknowledged);
                         (Some(self.pipesize), None)
                     } else {
                         trace!("{} entering careful resume validating phase", self.trace_id);
                         // Store the last packet number that was sent in the Unvalidated Phase
-                        self.change_state(CrState::Validating(largest_pkt_sent), CarefulResumeTrigger::CrMarkAcknowledged);
+                        self.change_state(CrState::Validating(largest_pkt_sent), CarefulResumeTrigger::LastUnvalidatedPacketAcknowledged);
                         (Some(flightsize), None)
                     }
                 } else {
@@ -164,7 +164,7 @@ impl Resume {
                 self.pipesize += packet.size;
                 if packet.pkt_num >= last_packet {
                     trace!("{} careful resume complete", self.trace_id);
-                    self.change_state(CrState::Normal, CarefulResumeTrigger::CrMarkAcknowledged);
+                    self.change_state(CrState::Normal, CarefulResumeTrigger::LastUnvalidatedPacketAcknowledged);
                 }
                 (None, None)
             }
@@ -197,7 +197,7 @@ impl Resume {
             let jump = (self.previous_cwnd / 2).saturating_sub(cwnd);
 
             if jump == 0 {
-                self.change_state(CrState::Normal, CarefulResumeTrigger::CwndLimited);
+                self.change_state(CrState::Normal, CarefulResumeTrigger::CongestionWindowLimited);
                 return 0;
             }
 
@@ -222,7 +222,7 @@ impl Resume {
 
             // Store the first packet number that was sent in the Unvalidated Phase
             trace!("{} entering careful resume unvalidated phase", self.trace_id);
-            self.change_state(CrState::Unvalidated(largest_pkt_sent), CarefulResumeTrigger::CwndLimited);
+            self.change_state(CrState::Unvalidated(largest_pkt_sent), CarefulResumeTrigger::CongestionWindowLimited);
             self.pipesize = cwnd;
             // we return the jump in window, CC code handles the increase in cwnd
             return jump;
@@ -1289,7 +1289,7 @@ mod tests {
         let now = Instant::now();
 
         r.setup(Duration::from_millis(50), 80_000);
-        r.change_state(CrState::Unvalidated(30), CarefulResumeTrigger::CwndLimited);
+        r.change_state(CrState::Unvalidated(30), CarefulResumeTrigger::CongestionWindowLimited);
 
         let p = Acked {
            pkt_num: 29,
